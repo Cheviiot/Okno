@@ -1,0 +1,22 @@
+[package]
+name = "okno-cli"
+description = "Okno command line: headless host, connection checks, discovery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "okno-cli"
+path = "src/main.rs"
+
+[dependencies]
+okno-proto.workspace = true
+okno-net.workspace = true
+okno-auth.workspace = true
+okno-discovery.workspace = true
+okno-core.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+clap.workspace = true
+anyhow.workspace = true
+tracing-subscriber.workspace = true

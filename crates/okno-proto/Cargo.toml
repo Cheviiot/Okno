@@ -1,0 +1,12 @@
+[package]
+name = "okno-proto"
+description = "Okno wire messages"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+prost.workspace = true
+bytes.workspace = true
+thiserror.workspace = true

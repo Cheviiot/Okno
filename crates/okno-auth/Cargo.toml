@@ -1,0 +1,19 @@
+[package]
+name = "okno-auth"
+description = "Okno host credentials, login throttling, network allowlist and pinned device keys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+okno-net.workspace = true
+argon2.workspace = true
+# Enables `OsRng` for salts in argon2's re-exported rand_core.
+rand_core = { version = "0.6", features = ["getrandom"] }
+zeroize.workspace = true
+ipnet.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+rand.workspace = true

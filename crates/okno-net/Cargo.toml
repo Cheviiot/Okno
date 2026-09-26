@@ -1,0 +1,20 @@
+[package]
+name = "okno-net"
+description = "Okno encrypted transport: Noise handshake and prioritised channels"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+okno-proto.workspace = true
+snow.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

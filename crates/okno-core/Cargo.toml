@@ -1,0 +1,25 @@
+[package]
+name = "okno-core"
+description = "Okno host and client sessions, configuration and device identity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+okno-proto.workspace = true
+okno-net.workspace = true
+okno-auth.workspace = true
+okno-discovery.workspace = true
+tokio.workspace = true
+socket2.workspace = true
+serde.workspace = true
+toml.workspace = true
+dirs.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+zeroize.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

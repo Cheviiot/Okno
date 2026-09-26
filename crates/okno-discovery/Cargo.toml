@@ -1,0 +1,18 @@
+[package]
+name = "okno-discovery"
+description = "Okno LAN discovery (mDNS, UDP broadcast) and Wake-on-LAN"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+okno-proto.workspace = true
+okno-net.workspace = true
+prost.workspace = true
+mdns-sd.workspace = true
+if-addrs.workspace = true
+socket2.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
