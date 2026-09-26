@@ -16,6 +16,8 @@ okno-net.workspace = true
 okno-auth.workspace = true
 okno-discovery.workspace = true
 okno-core.workspace = true
+okno-desktop.workspace = true
+png.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 clap.workspace = true
 anyhow.workspace = true

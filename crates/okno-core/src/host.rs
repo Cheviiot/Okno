@@ -15,7 +15,7 @@ use okno_auth::{AllowList, Credentials, LoginThrottle, ThrottleDecision};
 use okno_discovery::{Announcer, HostAnnouncement};
 use okno_net::{Fingerprint, Identity, Receiver, Sender};
 use okno_proto::envelope::Msg;
-use okno_proto::{Close, ErrorMsg, Hello, HostInfo, LoginResult, LoginStatus, PROTOCOL_VERSION};
+use okno_proto::{Close, Display, ErrorMsg, Hello, HostInfo, LoginResult, LoginStatus, PROTOCOL_VERSION};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
@@ -70,6 +70,11 @@ pub type BoxFuture = Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
 /// Runs the services of one session until it ends; the returned error text
 /// is reported in [`HostEvent::SessionClosed`].
 pub trait SessionHandler: Send + Sync + 'static {
+    /// Displays announced in `HostInfo`.
+    fn displays(&self) -> Vec<Display> {
+        Vec::new()
+    }
+
     fn run(&self, session: HostSession) -> BoxFuture;
 }
 
@@ -285,7 +290,7 @@ async fn serve(stream: TcpStream, peer: SocketAddr, id: u64, shared: &Shared) ->
 
     sender
         .send(Msg::HostInfo(HostInfo {
-            displays: Vec::new(),
+            displays: shared.handler.displays(),
             mac_addresses: local_mac_addresses(),
             services: shared.settings.services.clone(),
         }))

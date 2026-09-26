@@ -4,8 +4,10 @@
 
 pub mod client;
 pub mod config;
+pub mod desktop;
 pub mod endpoint;
 pub mod host;
+pub mod remote;
 
 pub use config::{Config, HostConfig, Store};
 pub use endpoint::Endpoint;

@@ -6,8 +6,11 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use okno_auth::{Credentials, TrustDecision};
 use okno_core::client::{self, ClientError};
-use okno_core::host::{ControlOnly, Host, HostEvent, HostSettings};
+use okno_core::desktop::DesktopHandler;
+use okno_core::host::{Host, HostEvent, HostSettings};
+use okno_core::remote::RemoteEvent;
 use okno_core::{Endpoint, Store};
+use okno_desktop::{Desktop, OpenOptions, TestDesktop};
 use okno_discovery::MacAddress;
 
 /// Okno without a window: run a host, test a connection, find devices.
@@ -32,6 +35,9 @@ enum Command {
     Host {
         #[arg(long)]
         port: Option<u16>,
+        /// Serve a generated test picture instead of the real screen.
+        #[arg(long)]
+        test_pattern: bool,
     },
     /// Look for hosts on the local network.
     Discover {
@@ -48,6 +54,12 @@ enum Command {
         trust: bool,
         #[arg(long, default_value_t = 3)]
         pings: u32,
+        /// Receive this many video frames and report the frame rate.
+        #[arg(long)]
+        frames: Option<u32>,
+        /// Save the last received frame as PNG.
+        #[arg(long)]
+        snapshot: Option<std::path::PathBuf>,
     },
     /// Send a Wake-on-LAN packet.
     Wake { mac: String },
@@ -77,7 +89,7 @@ async fn main() -> Result<()> {
             store.save_config(&config)?;
             println!("host login set for “{user}”");
         }
-        Command::Host { port } => run_host(&store, port).await?,
+        Command::Host { port, test_pattern } => run_host(&store, port, test_pattern).await?,
         Command::Discover { seconds } => {
             let own = store.identity()?.fingerprint();
             let peers = okno_discovery::discover(Duration::from_secs(seconds), Some(own)).await;
@@ -89,8 +101,8 @@ async fn main() -> Result<()> {
                 println!("{}  [{}]  {}  {}", p.name, p.os, p.fingerprint.display_short(), addrs.join(", "));
             }
         }
-        Command::Connect { endpoint, user, trust, pings } => {
-            connect(&store, &endpoint, &user, trust, pings).await?;
+        Command::Connect { endpoint, user, trust, pings, frames, snapshot } => {
+            connect(&store, &endpoint, &user, trust, pings, frames, snapshot).await?;
         }
         Command::Wake { mac } => {
             let mac: MacAddress = mac.parse().map_err(|_| anyhow::anyhow!("invalid MAC address"))?;
@@ -110,8 +122,8 @@ fn read_password() -> Result<String> {
     Ok(line.trim_end_matches(['\r', '\n']).to_owned())
 }
 
-async fn run_host(store: &Store, port: Option<u16>) -> Result<()> {
-    let config = store.load_config()?;
+async fn run_host(store: &Store, port: Option<u16>, test_pattern: bool) -> Result<()> {
+    let mut config = store.load_config()?;
     let credentials =
         config.host.credentials.clone().context("no host login configured; run `okno-cli set-password` first")?;
     let settings = HostSettings {
@@ -121,11 +133,27 @@ async fn run_host(store: &Store, port: Option<u16>) -> Result<()> {
         allowed_networks: config.host.allowed_networks.clone(),
         credentials,
         discoverable: config.host.discoverable,
-        services: Vec::new(),
+        services: vec![okno_core::desktop::SERVICE_DESKTOP.into()],
     };
+    let desktop: Arc<dyn Desktop> = if test_pattern {
+        Arc::new(TestDesktop::new(1280, 720, 30))
+    } else {
+        println!("requesting screen sharing permission…");
+        let opened = okno_desktop::open(OpenOptions { restore_token: config.host.portal_restore_token.clone() })
+            .await
+            .context("cannot access the desktop")?;
+        if opened.restore_token.is_some() && opened.restore_token != config.host.portal_restore_token {
+            config.host.portal_restore_token = opened.restore_token;
+            store.save_config(&config)?;
+        }
+        opened.desktop
+    };
+    for d in desktop.displays() {
+        println!("display {}: {} {}x{}{}", d.id, d.name, d.width, d.height, if d.primary { " (primary)" } else { "" });
+    }
     let identity = store.identity()?;
     println!("fingerprint: {}", identity.fingerprint().display_short());
-    let host = Host::start(identity, settings, Arc::new(ControlOnly)).await?;
+    let host = Host::start(identity, settings, Arc::new(DesktopHandler::new(desktop))).await?;
     let mut events = host.subscribe();
     for addr in host.local_addrs() {
         println!("listening on {addr}");
@@ -145,7 +173,15 @@ async fn run_host(store: &Store, port: Option<u16>) -> Result<()> {
     Ok(())
 }
 
-async fn connect(store: &Store, endpoint: &str, user: &str, accept_key: bool, pings: u32) -> Result<()> {
+async fn connect(
+    store: &Store,
+    endpoint: &str,
+    user: &str,
+    accept_key: bool,
+    pings: u32,
+    frames: Option<u32>,
+    snapshot: Option<std::path::PathBuf>,
+) -> Result<()> {
     let endpoint: Endpoint = endpoint.parse()?;
     let config = store.load_config()?;
     let identity = store.identity()?;
@@ -179,9 +215,60 @@ async fn connect(store: &Store, endpoint: &str, user: &str, accept_key: bool, pi
     if !session.host_info.mac_addresses.is_empty() {
         println!("MAC: {}", session.host_info.mac_addresses.join(", "));
     }
+    for d in &session.host_info.displays {
+        println!("display {}: {} {}x{}", d.id, d.name, d.width, d.height);
+    }
     for _ in 0..pings {
         println!("ping: {:.2} ms", session.ping().await?.as_secs_f64() * 1000.0);
     }
-    session.close("done").await;
+    let wanted = match (frames, &snapshot) {
+        (Some(n), _) => n.max(1),
+        (None, Some(_)) => 1,
+        (None, None) => {
+            session.close("done").await;
+            return Ok(());
+        }
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let remote = session.run(Arc::new(move |event| {
+        let _ = tx.send(event);
+    }));
+    remote.start_video(0, 30, 0).await?;
+    let started = std::time::Instant::now();
+    let mut received = 0;
+    let mut last = None;
+    while received < wanted {
+        let event = tokio::time::timeout(Duration::from_secs(15), rx.recv())
+            .await
+            .context("no video from the host")?
+            .context("session ended")?;
+        match event {
+            RemoteEvent::Frame { width, height, rgba, .. } => {
+                received += 1;
+                last = Some((width, height, rgba));
+            }
+            RemoteEvent::Error(e) => bail!("host error: {e}"),
+            RemoteEvent::Closed(reason) => bail!("session closed: {}", reason.unwrap_or_default()),
+            _ => {}
+        }
+    }
+    let secs = started.elapsed().as_secs_f64();
+    if let Some((w, h, _)) = &last {
+        println!("video: {received} frames {w}x{h} in {secs:.2} s ({:.1} fps)", received as f64 / secs);
+    }
+    if let (Some(path), Some((w, h, rgba))) = (snapshot, last) {
+        save_png(&path, w, h, &rgba)?;
+        println!("saved {}", path.display());
+    }
+    remote.close().await;
+    Ok(())
+}
+
+fn save_png(path: &std::path::Path, width: u32, height: u32, rgba: &[u8]) -> Result<()> {
+    let file = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut encoder = png::Encoder::new(file, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header()?.write_image_data(rgba)?;
     Ok(())
 }

@@ -36,6 +36,13 @@ OKNO_CONFIG_DIR=/tmp/okno-client okno-cli discover
 echo 'secret-pass' | OKNO_CONFIG_DIR=/tmp/okno-client okno-cli connect 127.0.0.1:21290 --user me --trust
 ```
 
+`okno-cli host --test-pattern` отдаёт сгенерированную картинку вместо экрана, а
+`connect --frames 90 --snapshot shot.png` принимает видео и сохраняет последний кадр.
+
+Настоящий захват на Linux идёт через портал RemoteDesktop: при первом запуске
+GNOME показывает диалог, токен восстановления сохраняется в
+`host.portal_restore_token`, и дальше диалога нет. Автотесты портал не трогают.
+
 `OKNO_LOG=debug` включает подробный журнал.
 
 ## Устройство
@@ -46,5 +53,7 @@ echo 'secret-pass' | OKNO_CONFIG_DIR=/tmp/okno-client okno-cli connect 127.0.0.1
 | `okno-net` | Noise_XX, фрагментация, каналы с приоритетами |
 | `okno-auth` | Argon2id, задержки входа, allowlist, TOFU |
 | `okno-discovery` | mDNS, UDP-broadcast, Wake-on-LAN |
-| `okno-core` | Конфиг, ключ устройства, хост и клиентская сессия |
+| `okno-codec` | H.264 (OpenH264 из исходников): кодер и декодер |
+| `okno-desktop` | Захват экрана и ввод: порталы + PipeWire (Linux), WGC + SendInput (Windows), тестовый рабочий стол |
+| `okno-core` | Конфиг, ключ устройства, хост, клиентская сессия, служба рабочего стола |
 | `okno-cli` | Командная строка |

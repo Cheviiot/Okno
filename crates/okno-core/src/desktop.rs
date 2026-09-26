@@ -1,0 +1,163 @@
+//! Host-side remote desktop service: streams a display and injects input.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::time::{Duration, Instant};
+
+use okno_codec::{EncoderSettings, VideoEncoder};
+use okno_desktop::{Desktop, Taken};
+use okno_net::{Sender, TrySendError};
+use okno_proto::envelope::Msg;
+use okno_proto::{Codec, Display, VideoFrame, VideoStart};
+
+use crate::host::{BoxFuture, HostSession, SessionHandler};
+
+pub const SERVICE_DESKTOP: &str = "desktop";
+
+/// Serves the remote desktop on top of the control messages.
+pub struct DesktopHandler {
+    desktop: Arc<dyn Desktop>,
+}
+
+impl DesktopHandler {
+    pub fn new(desktop: Arc<dyn Desktop>) -> Self {
+        Self { desktop }
+    }
+}
+
+impl SessionHandler for DesktopHandler {
+    fn displays(&self) -> Vec<Display> {
+        self.desktop
+            .displays()
+            .into_iter()
+            .map(|d| Display { id: d.id, name: d.name, width: d.width, height: d.height, primary: d.primary })
+            .collect()
+    }
+
+    fn run(&self, session: HostSession) -> BoxFuture {
+        Box::pin(serve(self.desktop.clone(), session))
+    }
+}
+
+async fn serve(desktop: Arc<dyn Desktop>, mut session: HostSession) -> Result<(), String> {
+    let mut stream: Option<Streamer> = None;
+    loop {
+        let msg = tokio::select! {
+            msg = session.receiver.recv() => msg,
+            _ = session.shutdown.changed() => return Ok(()),
+        };
+        match msg {
+            Ok(Msg::Input(event)) => desktop.inject(event),
+            Ok(Msg::VideoStart(start)) => {
+                stream = None; // stop the previous one first
+                match Streamer::start(desktop.clone(), session.sender.clone(), start) {
+                    Ok(s) => stream = Some(s),
+                    Err(e) => {
+                        let _ = session.sender.send(Msg::Error(okno_proto::ErrorMsg { message: e })).await;
+                    }
+                }
+            }
+            Ok(Msg::VideoStop(_)) => stream = None,
+            Ok(Msg::KeyframeRequest(_)) => {
+                if let Some(s) = &stream {
+                    s.shared.keyframe.store(true, Ordering::Relaxed);
+                }
+            }
+            Ok(Msg::Stats(stats)) => tracing::trace!("client stats: {stats:?}"),
+            Ok(Msg::Ping(p)) => session.sender.send(Msg::Pong(p)).await.map_err(|e| e.to_string())?,
+            Ok(Msg::Close(_)) | Err(okno_net::Error::Closed) => return Ok(()),
+            Ok(other) => tracing::debug!("unhandled message {other:?}"),
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+}
+
+struct Shared {
+    stop: AtomicBool,
+    keyframe: AtomicBool,
+    dropped: AtomicU32,
+}
+
+/// Capture → encode → send on a blocking thread; stops when dropped.
+struct Streamer {
+    shared: Arc<Shared>,
+}
+
+impl Drop for Streamer {
+    fn drop(&mut self) {
+        self.shared.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+impl Streamer {
+    fn start(desktop: Arc<dyn Desktop>, sender: Sender, start: VideoStart) -> Result<Self, String> {
+        let capture = desktop.capture(start.display).map_err(|e| e.to_string())?;
+        let settings = EncoderSettings {
+            max_fps: if start.max_fps == 0 { 30 } else { start.max_fps.min(60) },
+            bitrate_kbps: if start.bitrate_kbps == 0 { 8000 } else { start.bitrate_kbps },
+        };
+        let mut encoder = VideoEncoder::new(settings).map_err(|e| e.to_string())?;
+        let shared = Arc::new(Shared {
+            stop: AtomicBool::new(false),
+            keyframe: AtomicBool::new(false),
+            dropped: AtomicU32::new(0),
+        });
+        let state = shared.clone();
+        let display_id = start.display;
+        tokio::task::spawn_blocking(move || {
+            // Own the whole capture: a closure would otherwise capture only
+            // `capture.slot` and drop the guard that keeps capturing alive.
+            let capture = capture;
+            let interval = Duration::from_secs(1) / settings.max_fps;
+            let epoch = Instant::now();
+            let mut next = Instant::now();
+            while !state.stop.load(Ordering::Relaxed) {
+                let frame = match capture.slot.take(Duration::from_millis(250)) {
+                    Taken::Frame(f) => f,
+                    Taken::Timeout => continue,
+                    Taken::Closed => break,
+                };
+                if state.keyframe.swap(false, Ordering::Relaxed) {
+                    encoder.request_keyframe();
+                }
+                let pts = epoch.elapsed().as_micros() as u64;
+                let packet = match encoder.encode(&frame, pts) {
+                    Ok(Some(p)) => p,
+                    Ok(None) => continue,
+                    Err(e) => {
+                        tracing::warn!("encode failed: {e}");
+                        break;
+                    }
+                };
+                let msg = Msg::Video(VideoFrame {
+                    display: display_id,
+                    codec: Codec::H264 as i32,
+                    width: packet.width,
+                    height: packet.height,
+                    keyframe: packet.keyframe,
+                    pts_us: pts,
+                    data: packet.data,
+                });
+                match sender.try_send(msg) {
+                    Ok(()) => {}
+                    // The link is slower than the encoder: a lost P-frame
+                    // breaks the reference chain, so restart from a keyframe.
+                    Err(TrySendError::Full) => {
+                        state.dropped.fetch_add(1, Ordering::Relaxed);
+                        encoder.request_keyframe();
+                    }
+                    Err(TrySendError::Closed) => break,
+                }
+                next += interval;
+                let now = Instant::now();
+                if next > now {
+                    std::thread::sleep(next - now);
+                } else {
+                    next = now;
+                }
+            }
+            tracing::debug!("video stream of display {display_id} stopped");
+        });
+        Ok(Self { shared })
+    }
+}

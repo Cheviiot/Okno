@@ -40,6 +40,8 @@ pub struct HostConfig {
     /// Announce the host via mDNS and answer broadcast queries.
     pub discoverable: bool,
     pub credentials: Option<Credentials>,
+    /// Linux: XDG portal restore token, so screen sharing is not asked again.
+    pub portal_restore_token: Option<String>,
 }
 
 impl Default for HostConfig {
@@ -51,6 +53,7 @@ impl Default for HostConfig {
             allowed_networks: AllowList::default(),
             discoverable: true,
             credentials: None,
+            portal_restore_token: None,
         }
     }
 }

@@ -1,0 +1,11 @@
+[package]
+name = "okno-codec"
+description = "Okno video encoding and decoding"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openh264 = "0.9"
+thiserror.workspace = true
