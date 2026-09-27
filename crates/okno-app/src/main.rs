@@ -3,6 +3,7 @@
 mod app;
 mod chrome;
 mod clipboard;
+mod files_ui;
 mod host;
 mod keys;
 mod session;
@@ -36,8 +37,28 @@ fn main() -> anyhow::Result<()> {
 pub fn select_language() {
     let lang = std::env::var("OKNO_LANG").ok().or_else(sys_locale::get_locale).unwrap_or_default();
     if lang.to_ascii_lowercase().starts_with("ru") {
+        DECIMAL_COMMA.store(true, std::sync::atomic::Ordering::Relaxed);
         if let Err(e) = slint::select_bundled_translation("ru") {
             tracing::warn!("Russian translation unavailable: {e}");
         }
+    }
+}
+
+static DECIMAL_COMMA: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether numbers use a decimal comma (the Russian translation is active).
+pub fn uses_decimal_comma() -> bool {
+    DECIMAL_COMMA.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Opens a link or folder with the default application.
+pub fn open_url(url: &str) {
+    let program = if cfg!(windows) { "explorer" } else { "xdg-open" };
+    match std::process::Command::new(program).arg(url).spawn() {
+        // Reap the helper so it does not linger as a zombie.
+        Ok(mut child) => {
+            std::thread::spawn(move || child.wait());
+        }
+        Err(e) => tracing::warn!("cannot open {url}: {e}"),
     }
 }

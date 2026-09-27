@@ -976,3 +976,19 @@ export component KCaption inherits KText {
     font-size: Theme.font-small;
     wrap: word-wrap;
 }
+
+// Determinate progress bar (0..1).
+export component KProgressBar inherits Rectangle {
+    in property <float> progress;
+    in property <bool> error;
+    height: 6px;
+    border-radius: 3px;
+    background: Theme.control;
+    Rectangle {
+        x: 0;
+        width: parent.width * clamp(root.progress, 0, 1);
+        border-radius: 3px;
+        background: root.error ? Theme.destructive : Theme.accent;
+        animate width { duration: 150ms; }
+    }
+}

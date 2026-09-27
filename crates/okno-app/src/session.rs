@@ -41,6 +41,7 @@ pub struct SessionView {
     remote: Rc<RefCell<Option<Remote>>>,
     /// Checks for the end of the session reported by worker threads.
     _poll_closed: slint::Timer,
+    _files: crate::files_ui::FilesUi,
 }
 
 impl SessionView {
@@ -54,6 +55,7 @@ impl SessionView {
     ) -> Result<Rc<Self>, slint::PlatformError> {
         let window = SessionWindow::new()?;
         chrome::apply!(window, look);
+        let session_name = session.host.device_name.clone();
         let cursor = Cursor::default();
         let messages = window.global::<Messages>();
         window.set_session_title(SharedString::from(format!("{} — Okno", session.host.device_name)));
@@ -110,6 +112,7 @@ impl SessionView {
             _ => {}
         }));
         remote.request_video(primary as u32, MAX_FPS, 0);
+        let files = crate::files_ui::install(&window, remote.files(), tokio::runtime::Handle::current(), &session_name);
         let remote = Rc::new(RefCell::new(Some(remote)));
         let display = Rc::new(Cell::new(primary as u32));
 
@@ -302,7 +305,7 @@ impl SessionView {
         }
 
         window.show()?;
-        Ok(Rc::new(Self { _window: window, remote, _poll_closed: poll_closed }))
+        Ok(Rc::new(Self { _window: window, remote, _poll_closed: poll_closed, _files: files }))
     }
 
     pub fn apply_look(&self, look: &Look) {

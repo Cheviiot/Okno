@@ -13,7 +13,7 @@ okno-auth.workspace = true
 okno-discovery.workspace = true
 okno-codec.workspace = true
 okno-desktop.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 socket2.workspace = true
 serde.workspace = true
 toml.workspace = true
@@ -22,6 +22,7 @@ thiserror.workspace = true
 tracing.workspace = true
 zeroize.workspace = true
 rand.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

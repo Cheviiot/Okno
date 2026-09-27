@@ -384,3 +384,57 @@ msgstr "Это приложение поставляется без каких-�
 
 msgid "Leave Full Screen"
 msgstr "Выйти из полноэкранного режима"
+
+msgid "Files"
+msgstr "Файлы"
+
+msgid "Send to {}"
+msgstr "Отправить на {}"
+
+msgid "Files are saved to the Downloads folder on that computer."
+msgstr "Файлы сохранятся в папку «Загрузки» на том компьютере."
+
+msgid "Choose Files…"
+msgstr "Выбрать файлы…"
+
+msgid "Transfers"
+msgstr "Передачи"
+
+msgid "Files on {}"
+msgstr "Файлы на {}"
+
+msgid "Parent Folder"
+msgstr "На уровень выше"
+
+msgid "The folder is empty"
+msgstr "Папка пуста"
+
+msgid "{} B"
+msgstr "{} Б"
+
+msgid "{} kB"
+msgstr "{} КБ"
+
+msgid "{} MB"
+msgstr "{} МБ"
+
+msgid "{} GB"
+msgstr "{} ГБ"
+
+msgid "{} of {}"
+msgstr "{} из {}"
+
+msgid "Waiting…"
+msgstr "Ожидание…"
+
+msgid "Saved to Downloads"
+msgstr "Сохранено в «Загрузки»"
+
+msgid "Sent"
+msgstr "Отправлено"
+
+msgid "Failed: {}"
+msgstr "Ошибка: {}"
+
+msgid "Choose Files to Send"
+msgstr "Выберите файлы для отправки"

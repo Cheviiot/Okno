@@ -1,5 +1,6 @@
 //! Host-side remote desktop service: streams a display and injects input.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -10,6 +11,7 @@ use okno_net::{Sender, TrySendError};
 use okno_proto::envelope::Msg;
 use okno_proto::{ClipboardText, Codec, Display, VideoFrame, VideoStart};
 
+use crate::files::FileService;
 use crate::host::{BoxFuture, HostSession, SessionHandler};
 
 pub const SERVICE_DESKTOP: &str = "desktop";
@@ -17,11 +19,18 @@ pub const SERVICE_DESKTOP: &str = "desktop";
 /// Serves the remote desktop on top of the control messages.
 pub struct DesktopHandler {
     desktop: Arc<dyn Desktop>,
+    incoming: PathBuf,
 }
 
 impl DesktopHandler {
     pub fn new(desktop: Arc<dyn Desktop>) -> Self {
-        Self { desktop }
+        Self { desktop, incoming: FileService::default_incoming() }
+    }
+
+    /// Directory for files sent by clients.
+    pub fn with_incoming(mut self, dir: PathBuf) -> Self {
+        self.incoming = dir;
+        self
     }
 }
 
@@ -35,7 +44,7 @@ impl SessionHandler for DesktopHandler {
     }
 
     fn run(&self, session: HostSession) -> BoxFuture {
-        Box::pin(serve(self.desktop.clone(), session))
+        Box::pin(serve(self.desktop.clone(), self.incoming.clone(), session))
     }
 }
 
@@ -48,8 +57,9 @@ impl Drop for TaskGuard {
     }
 }
 
-async fn serve(desktop: Arc<dyn Desktop>, mut session: HostSession) -> Result<(), String> {
+async fn serve(desktop: Arc<dyn Desktop>, incoming: PathBuf, mut session: HostSession) -> Result<(), String> {
     let mut stream: Option<Streamer> = None;
+    let mut files = FileService::new(session.sender.clone(), incoming);
 
     // Clipboard: host copies go to the client, client texts to the host.
     let clipboard = desktop.clipboard();
@@ -74,6 +84,7 @@ async fn serve(desktop: Arc<dyn Desktop>, mut session: HostSession) -> Result<()
         };
         match msg {
             Ok(Msg::Input(event)) => desktop.inject(event),
+            Ok(Msg::File(request)) => files.handle(request).await,
             Ok(Msg::Clipboard(c)) => {
                 if let Some(link) = &clipboard {
                     if c.text.len() <= okno_desktop::MAX_CLIPBOARD {

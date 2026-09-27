@@ -6,6 +6,7 @@ pub mod client;
 pub mod config;
 pub mod desktop;
 pub mod endpoint;
+pub mod files;
 pub mod host;
 pub mod remote;
 

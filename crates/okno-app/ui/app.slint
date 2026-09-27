@@ -5,7 +5,7 @@ import { ComboBox } from "std-widgets.slint";
 import {
     Theme, KText, KIcon, KButton, KIconButton, KEntry, KSwitch, KGroup, KRow, KEntryRow, KSwitchRow,
     KButtonRow, KStatusPage, KPage, KSplitView, KHeaderBar, KAppWindow, KSheet, KDialog, KDialogButtons,
-    KToast, KSpinner, KCaption,
+    KToast, KSpinner, KCaption, KProgressBar,
 } from "@kit/kit.slint";
 import { NavItem, HeaderAction, Icons, WindowOps } from "common.slint";
 
@@ -23,6 +23,21 @@ export struct SessionRow {
     id: int,
     title: string,
     subtitle: string,
+}
+
+export struct FileRow {
+    name: string,
+    subtitle: string,
+    is-dir: bool,
+}
+
+export struct TransferRow {
+    name: string,
+    status: string,
+    progress: float,
+    // 0 running, 1 done, 2 failed
+    state: int,
+    upload: bool,
 }
 
 export enum DialogKind { none, connecting, trust-new, trust-changed, login }
@@ -521,6 +536,7 @@ component SessionBar inherits KHeaderBar {
     in property <[string]> displays;
     in-out property <int> display;
     in property <bool> fullscreen;
+    callback open-files;
     callback display-selected(int);
     callback toggle-fullscreen;
     callback disconnect;
@@ -534,6 +550,11 @@ component SessionBar inherits KHeaderBar {
         selected => { root.display-selected(self.current-index); }
     }
     KIconButton {
+        icon: Icons.folder;
+        tooltip: @tr("Files");
+        clicked => { root.open-files(); }
+    }
+    KIconButton {
         icon: root.fullscreen ? Icons.unfullscreen : Icons.fullscreen;
         tooltip: root.fullscreen ? @tr("Leave Full Screen") : @tr("Full Screen");
         clicked => { root.toggle-fullscreen(); }
@@ -545,8 +566,100 @@ component SessionBar inherits KHeaderBar {
     }
 }
 
+// Files sheet of a session: send, transfers, browse the host.
+component FilesContent inherits KPage {
+    in property <string> host-name;
+    in property <string> path;
+    in property <bool> can-up;
+    in property <bool> loading;
+    in property <string> error;
+    in property <[FileRow]> files;
+    in property <[TransferRow]> transfers;
+    callback send;
+    callback up;
+    callback activate(int);
+    callback open-transfer(int);
+
+    KGroup {
+        title: @tr("Send to {}", root.host-name);
+        description: @tr("Files are saved to the Downloads folder on that computer.");
+        KButtonRow {
+            title: @tr("Choose Files…");
+            primary: true;
+            clicked => { root.send(); }
+        }
+    }
+
+    if root.transfers.length > 0: KGroup {
+        title: @tr("Transfers");
+        for t[i] in root.transfers: KRow {
+            has-icon: true;
+            icon: t.upload ? Icons.send : Icons.download;
+            title: t.name;
+            subtitle: t.status;
+            last: i == root.transfers.length - 1;
+            activatable: t.state == 1 && !t.upload;
+            clicked => { root.open-transfer(i); }
+            if t.state == 0: VerticalLayout {
+                alignment: center;
+                KProgressBar {
+                    width: 120px;
+                    progress: t.progress;
+                }
+            }
+            if t.state == 1: KIcon { source: Icons.ok; tint: Theme.success; }
+            if t.state == 2: KIcon { source: Icons.warning; tint: Theme.destructive-text; }
+        }
+    }
+
+    KGroup {
+        title: @tr("Files on {}", root.host-name);
+        description: root.path;
+        busy: root.loading;
+        if root.can-up: KRow {
+            has-icon: true;
+            icon: Icons.up;
+            title: @tr("Parent Folder");
+            activatable: true;
+            last: root.files.length == 0 && root.error == "";
+            clicked => { root.up(); }
+        }
+        if root.error != "": KRow {
+            title: root.error;
+            last: true;
+        }
+        if root.error == "" && root.files.length == 0 && !root.loading: KRow {
+            title: @tr("The folder is empty");
+            last: true;
+        }
+        for f[i] in root.files: KRow {
+            has-icon: true;
+            icon: f.is-dir ? Icons.folder : Icons.file;
+            title: f.name;
+            subtitle: f.subtitle;
+            activatable: true;
+            last: i == root.files.length - 1;
+            clicked => { root.activate(i); }
+            KIcon { source: f.is-dir ? Icons.go : Icons.download; tint: Theme.dim-fg; }
+        }
+    }
+}
+
 export component SessionWindow inherits KAppWindow {
     in property <string> session-title;
+    in property <string> host-name;
+    in-out property <bool> files-open;
+    in property <string> files-path;
+    in property <bool> files-can-up;
+    in property <bool> files-loading;
+    in property <string> files-error;
+    in property <[FileRow]> files;
+    in property <[TransferRow]> transfers;
+    callback files-opened;
+    callback files-send;
+    callback files-up;
+    callback files-activate(int);
+    callback files-open-transfer(int);
     in property <image> frame;
     in property <bool> has-frame;
     in property <string> status;
@@ -575,6 +688,7 @@ export component SessionWindow inherits KAppWindow {
         displays: root.displays;
         display <=> root.display;
         fullscreen: false;
+        open-files => { root.files-open = true; root.files-opened(); }
         display-selected(i) => { root.display-selected(i); }
         toggle-fullscreen => { root.toggle-fullscreen(); }
         disconnect => { root.disconnect(); }
@@ -647,11 +761,32 @@ export component SessionWindow inherits KAppWindow {
         displays: root.displays;
         display <=> root.display;
         fullscreen: true;
+        open-files => { root.reveal = false; root.files-open = true; root.files-opened(); }
         drop-shadow-blur: 12px;
         drop-shadow-color: #00000060;
         display-selected(i) => { root.display-selected(i); }
         toggle-fullscreen => { root.reveal = false; root.toggle-fullscreen(); }
         disconnect => { root.disconnect(); }
+    }
+
+    if root.files-open: KSheet {
+        title: @tr("Files");
+        sheet-width: 640px;
+        sheet-height: 640px;
+        closed => { root.files-open = false; }
+        FilesContent {
+            host-name: root.host-name;
+            path: root.files-path;
+            can-up: root.files-can-up;
+            loading: root.files-loading;
+            error: root.files-error;
+            files: root.files;
+            transfers: root.transfers;
+            send => { root.files-send(); }
+            up => { root.files-up(); }
+            activate(i) => { root.files-activate(i); }
+            open-transfer(i) => { root.files-open-transfer(i); }
+        }
     }
 
     function report() {
@@ -695,4 +830,14 @@ export global Messages {
     pure public function device-subtitle(addr: string, os: string) -> string { @tr("{} · {}", addr, os) }
     pure public function forgotten() -> string { @tr("Device forgotten") }
     pure public function name-saved() -> string { @tr("Device name saved") }
+
+    pure public function size(n: string, unit: int) -> string {
+        unit == 0 ? @tr("{} B", n) : unit == 1 ? @tr("{} kB", n) : unit == 2 ? @tr("{} MB", n) : @tr("{} GB", n)
+    }
+    pure public function transfer-progress(done: string, total: string) -> string { @tr("{} of {}", done, total) }
+    pure public function transfer-waiting() -> string { @tr("Waiting…") }
+    pure public function downloaded() -> string { @tr("Saved to Downloads") }
+    pure public function uploaded() -> string { @tr("Sent") }
+    pure public function transfer-failed(e: string) -> string { @tr("Failed: {}", e) }
+    pure public function choose-files() -> string { @tr("Choose Files to Send") }
 }

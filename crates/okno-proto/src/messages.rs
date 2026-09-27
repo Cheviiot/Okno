@@ -343,10 +343,17 @@ pub mod file_msg {
 
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DirListing {
+    /// Absolute path of the listed directory on the host.
     #[prost(string, tag = "1")]
     pub path: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
     pub entries: ::prost::alloc::vec::Vec<DirEntry>,
+    /// Parent directory; empty at the root.
+    #[prost(string, tag = "3")]
+    pub parent: ::prost::alloc::string::String,
+    /// Path separator of the host, to build child paths.
+    #[prost(string, tag = "4")]
+    pub separator: ::prost::alloc::string::String,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -11,6 +11,7 @@ use okno_proto::{Close, InputEvent, KeyframeRequest, VideoFrame, VideoStart, Vid
 use tokio::task::JoinHandle;
 
 use crate::client::Session;
+use crate::files::Files;
 
 /// Decoded packets waiting for the decoder. When full, the reader drops
 /// frames until the next keyframe instead of building latency.
@@ -38,20 +39,27 @@ pub type EventSink = Arc<dyn Fn(RemoteEvent) + Send + Sync>;
 /// Handle to a running session.
 pub struct Remote {
     sender: Sender,
+    files: Files,
     reader: JoinHandle<()>,
 }
 
 impl Session {
     /// Starts the background reader. `events` is called from worker threads.
     pub fn run(self, events: EventSink) -> Remote {
-        let reader = tokio::spawn(read_loop(self.receiver, self.sender.clone(), events));
-        Remote { sender: self.sender, reader }
+        let files = Files::new(self.sender.clone());
+        let reader = tokio::spawn(read_loop(self.receiver, self.sender.clone(), files.clone(), events));
+        Remote { sender: self.sender, files, reader }
     }
 }
 
 impl Remote {
     pub fn sender(&self) -> &Sender {
         &self.sender
+    }
+
+    /// File transfer with the host.
+    pub fn files(&self) -> Files {
+        self.files.clone()
     }
 
     pub async fn start_video(&self, display: u32, max_fps: u32, bitrate_kbps: u32) -> Result<(), okno_net::Error> {
@@ -85,7 +93,7 @@ impl Remote {
     }
 }
 
-async fn read_loop(mut receiver: Receiver, sender: Sender, events: EventSink) {
+async fn read_loop(mut receiver: Receiver, sender: Sender, files: Files, events: EventSink) {
     let (packets, queue) = std_mpsc::sync_channel::<VideoFrame>(DECODE_QUEUE);
     let decoder_events = events.clone();
     let decoder_sender = sender.clone();
@@ -108,6 +116,7 @@ async fn read_loop(mut receiver: Receiver, sender: Sender, events: EventSink) {
                 }
             }
             Ok(Msg::Clipboard(c)) => events(RemoteEvent::Clipboard(c.text)),
+            Ok(Msg::File(reply)) => files.dispatch(reply),
             Ok(Msg::Error(e)) => events(RemoteEvent::Error(e.message)),
             Ok(Msg::Ping(p)) => {
                 let _ = sender.send(Msg::Pong(p)).await;
