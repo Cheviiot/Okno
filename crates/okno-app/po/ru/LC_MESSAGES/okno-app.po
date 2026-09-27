@@ -369,3 +369,18 @@ msgstr "Развернуть"
 
 msgid "Main Menu"
 msgstr "Главное меню"
+
+msgid "Website"
+msgstr "Сайт"
+
+msgid "Report an Issue"
+msgstr "Сообщить о проблеме"
+
+msgid "Legal"
+msgstr "Правовая информация"
+
+msgid "This application comes with absolutely no warranty."
+msgstr "Это приложение поставляется без каких-либо гарантий."
+
+msgid "Leave Full Screen"
+msgstr "Выйти из полноэкранного режима"

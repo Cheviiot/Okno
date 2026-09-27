@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#62a0ea"/>
+      <stop offset="1" stop-color="#3584e4"/>
+    </linearGradient>
+    <linearGradient id="win" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#deddda"/>
+    </linearGradient>
+  </defs>
+  <!-- stand -->
+  <path d="M52 100h24l4 14H48z" fill="#9a9996"/>
+  <rect x="38" y="110" width="52" height="8" rx="4" fill="#77767b"/>
+  <!-- monitor body with depth -->
+  <rect x="8" y="18" width="112" height="84" rx="12" fill="#241f31"/>
+  <rect x="8" y="14" width="112" height="84" rx="12" fill="#3d3846"/>
+  <!-- screen -->
+  <rect x="16" y="22" width="96" height="68" rx="6" fill="url(#screen)"/>
+  <!-- remote window: second screen inside -->
+  <rect x="30" y="34" width="68" height="46" rx="5" fill="#1a5fb4" opacity=".45"/>
+  <rect x="28" y="31" width="68" height="46" rx="5" fill="url(#win)"/>
+  <path d="M33 31h58a5 5 0 0 1 5 5v5H28v-5a5 5 0 0 1 5-5z" fill="#c0bfbc"/>
+  <circle cx="89" cy="36" r="2.2" fill="#e01b24"/>
+  <circle cx="82" cy="36" r="2.2" fill="#f6d32d"/>
+  <rect x="34" y="47" width="30" height="4" rx="2" fill="#99c1f1"/>
+  <rect x="34" y="55" width="44" height="4" rx="2" fill="#c0bfbc"/>
+  <rect x="34" y="63" width="36" height="4" rx="2" fill="#c0bfbc"/>
+  <!-- pointer -->
+  <path d="M78 56v26l7-7 5 11 5-2-5-11h10z" fill="#ffffff" stroke="#241f31" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>

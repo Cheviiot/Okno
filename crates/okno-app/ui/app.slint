@@ -236,7 +236,7 @@ component SettingsContent inherits KPage {
 
 export component MainWindow inherits KAppWindow {
     title: "Okno";
-    icon: @image-url("icons/host.svg");
+    icon: @image-url("icons/app.svg");
     preferred-width: 980px;
     preferred-height: 680px;
     min-width: 720px;
@@ -292,6 +292,7 @@ export component MainWindow inherits KAppWindow {
     in property <string> saved-device-name;
     in property <string> version;
     callback device-name-committed(string);
+    callback open-url(string);
 
     // Notifications
     in property <string> toast;
@@ -364,33 +365,78 @@ export component MainWindow inherits KAppWindow {
         }
     }
 
+    // AdwAboutDialog.
     if root.about-open: KSheet {
         title: "";
         sheet-width: 360px;
-        sheet-height: 460px;
+        sheet-height: 560px;
         closed => { root.about-open = false; }
-        KStatusPage {
-            icon: Icons.host;
-            title: "Okno";
-            description: @tr("Remote desktop for the local network");
-            HorizontalLayout {
-                alignment: center;
-                Rectangle {
-                    width: ver.preferred-width + 20px;
-                    height: 26px;
-                    border-radius: 13px;
-                    background: Theme.accent.transparentize(80%);
-                    ver := KText {
-                        text: root.version;
-                        color: Theme.accent-text;
-                        font-weight: 700;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+        KPage {
+            VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    alignment: center;
+                    Image {
+                        width: 128px;
+                        height: 128px;
+                        source: Icons.app;
+                    }
+                }
+                KText {
+                    text: "Okno";
+                    font-size: 26px;
+                    font-weight: 800;
+                    horizontal-alignment: center;
+                }
+                KText {
+                    text: "Cheviiot";
+                    horizontal-alignment: center;
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    padding-top: 6px;
+                    Rectangle {
+                        width: ver.preferred-width + 20px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: Theme.accent.transparentize(80%);
+                        ver := KText {
+                            text: root.version;
+                            color: Theme.accent-text;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }
+            KGroup {
+                KRow {
+                    title: @tr("Website");
+                    activatable: true;
+                    clicked => { root.open-url("https://github.com/Cheviiot/Okno"); }
+                    KIcon { source: Icons.external; }
+                }
+                KRow {
+                    title: @tr("Report an Issue");
+                    activatable: true;
+                    last: true;
+                    clicked => { root.open-url("https://github.com/Cheviiot/Okno/issues"); }
+                    KIcon { source: Icons.external; }
+                }
+            }
+            KGroup {
+                KRow {
+                    title: @tr("Legal");
+                    subtitle: "GPL-3.0-only";
+                    activatable: true;
+                    last: true;
+                    clicked => { root.open-url("https://www.gnu.org/licenses/gpl-3.0.html"); }
+                    KIcon { source: Icons.external; }
+                }
+            }
             KCaption {
-                text: @tr("This application comes with absolutely no warranty. See the GNU General Public License, version 3 only, for details.");
+                text: @tr("This application comes with absolutely no warranty.");
                 horizontal-alignment: center;
             }
         }
@@ -471,6 +517,34 @@ export component MainWindow inherits KAppWindow {
     }
 }
 
+component SessionBar inherits KHeaderBar {
+    in property <[string]> displays;
+    in-out property <int> display;
+    in property <bool> fullscreen;
+    callback display-selected(int);
+    callback toggle-fullscreen;
+    callback disconnect;
+
+    // No window buttons in full screen; the leave button replaces them.
+    start-controls: !fullscreen;
+    end-controls: !fullscreen;
+    if root.displays.length > 1: ComboBox {
+        model: root.displays;
+        current-index <=> root.display;
+        selected => { root.display-selected(self.current-index); }
+    }
+    KIconButton {
+        icon: root.fullscreen ? Icons.unfullscreen : Icons.fullscreen;
+        tooltip: root.fullscreen ? @tr("Leave Full Screen") : @tr("Full Screen");
+        clicked => { root.toggle-fullscreen(); }
+    }
+    KButton {
+        text: @tr("Disconnect");
+        destructive: true;
+        clicked => { root.disconnect(); }
+    }
+}
+
 export component SessionWindow inherits KAppWindow {
     in property <string> session-title;
     in property <image> frame;
@@ -491,24 +565,19 @@ export component SessionWindow inherits KAppWindow {
     preferred-height: 800px;
     full-screen: fullscreen;
 
+    // In full screen the header bar hides and slides in when the pointer
+    // touches the top edge, as in GNOME Connections.
+    property <bool> reveal;
+
     VerticalLayout {
-    if !fullscreen: KHeaderBar {
+    if !fullscreen: SessionBar {
         title: root.session-title;
-        if root.displays.length > 1: ComboBox {
-            model: root.displays;
-            current-index <=> root.display;
-            selected => { root.display-selected(self.current-index); }
-        }
-        KIconButton {
-            icon: Icons.fullscreen;
-            tooltip: @tr("Full Screen");
-            clicked => { root.toggle-fullscreen(); }
-        }
-        KButton {
-            text: @tr("Disconnect");
-            destructive: true;
-            clicked => { root.disconnect(); }
-        }
+        displays: root.displays;
+        display <=> root.display;
+        fullscreen: false;
+        display-selected(i) => { root.display-selected(i); }
+        toggle-fullscreen => { root.toggle-fullscreen(); }
+        disconnect => { root.disconnect(); }
     }
     video := Rectangle {
         background: #000000;
@@ -542,7 +611,10 @@ export component SessionWindow inherits KAppWindow {
         area := TouchArea {
             mouse-cursor: root.has-frame ? MouseCursor.none : MouseCursor.default;
             changed mouse-x => { root.report(); }
-            changed mouse-y => { root.report(); }
+            changed mouse-y => {
+                root.report();
+                if root.reveal && self.mouse-y > 80px { root.reveal = false; }
+            }
             pointer-event(e) => {
                 if e.kind == PointerEventKind.down || e.kind == PointerEventKind.up {
                     root.report();
@@ -561,6 +633,25 @@ export component SessionWindow inherits KAppWindow {
             }
         }
     }
+    }
+
+    if root.fullscreen: TouchArea {
+        y: 0;
+        height: 3px;
+        changed has-hover => { if self.has-hover { root.reveal = true; } }
+    }
+    if root.fullscreen && root.reveal: SessionBar {
+        y: 0;
+        height: 47px;
+        title: root.session-title;
+        displays: root.displays;
+        display <=> root.display;
+        fullscreen: true;
+        drop-shadow-blur: 12px;
+        drop-shadow-color: #00000060;
+        display-selected(i) => { root.display-selected(i); }
+        toggle-fullscreen => { root.reveal = false; root.toggle-fullscreen(); }
+        disconnect => { root.disconnect(); }
     }
 
     function report() {

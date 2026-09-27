@@ -209,6 +209,7 @@ impl App {
                 app.login();
             }
         });
+        w.on_open_url(|url| open_url(&url));
         let weak = Rc::downgrade(self);
         w.on_device_name_committed(move |name| {
             let Some(app) = weak.upgrade() else { return };
@@ -442,6 +443,18 @@ impl App {
             Ok(view) => self.sessions.borrow_mut().push(view),
             Err(e) => self.toast(e.to_string().into(), true),
         }
+    }
+}
+
+/// Opens a link in the default browser.
+fn open_url(url: &str) {
+    let program = if cfg!(windows) { "explorer" } else { "xdg-open" };
+    match std::process::Command::new(program).arg(url).spawn() {
+        // Reap the helper so it does not linger as a zombie.
+        Ok(mut child) => {
+            std::thread::spawn(move || child.wait());
+        }
+        Err(e) => tracing::warn!("cannot open {url}: {e}"),
     }
 }
 
