@@ -58,14 +58,14 @@ pub fn capture(stop: Arc<AtomicBool>, mut sink: SampleSink) -> Result<Box<dyn Se
         let device = cpal::default_host().default_output_device().ok_or_else(|| err("no output device"))?;
         let config = device.default_output_config().map_err(err)?;
         let channels = config.channels() as usize;
-        if config.sample_rate().0 != RATE {
-            tracing::warn!("output runs at {} Hz; sound will be pitched", config.sample_rate().0);
+        if config.sample_rate() != RATE {
+            tracing::warn!("output runs at {} Hz; sound will be pitched", config.sample_rate());
         }
         let mut stereo = Vec::new();
         // WASAPI loopback: an input stream on an output device.
         device
             .build_input_stream(
-                &config.config(),
+                config.config(),
                 move |data: &[f32], _| {
                     to_stereo(data, channels, &mut stereo);
                     sink(&stereo);
@@ -80,14 +80,11 @@ pub fn capture(stop: Arc<AtomicBool>, mut sink: SampleSink) -> Result<Box<dyn Se
 pub fn play(stop: Arc<AtomicBool>, ring: Arc<SampleRing>) -> Result<Box<dyn Send>, AudioError> {
     keep_on_thread("okno-audio-playback", stop, move || {
         let device = cpal::default_host().default_output_device().ok_or_else(|| err("no output device"))?;
-        let config = cpal::StreamConfig {
-            channels: CHANNELS as u16,
-            sample_rate: cpal::SampleRate(RATE),
-            buffer_size: cpal::BufferSize::Default,
-        };
+        let config =
+            cpal::StreamConfig { channels: CHANNELS as u16, sample_rate: RATE, buffer_size: cpal::BufferSize::Default };
         device
             .build_output_stream(
-                &config,
+                config,
                 move |data: &mut [f32], _| ring.pull(data),
                 |e| tracing::warn!("playback: {e}"),
                 None,
