@@ -16,7 +16,9 @@ use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, Shar
 
 use crate::chrome::{self, Cursor, Look};
 use crate::clipboard::LocalClipboard;
-use crate::{Messages, SessionWindow, keys};
+use crate::terminal_ui::TerminalView;
+use crate::{ForwardRow, Messages, SessionWindow, keys};
+use okno_core::tunnel::Forward;
 
 const MAX_FPS: u32 = 30;
 
@@ -42,6 +44,8 @@ pub struct SessionView {
     /// Checks for the end of the session reported by worker threads.
     _poll_closed: slint::Timer,
     _files: crate::files_ui::FilesUi,
+    terminals: Rc<RefCell<Vec<Rc<TerminalView>>>>,
+    _forwards: Rc<RefCell<Vec<Forward>>>,
 }
 
 impl SessionView {
@@ -113,11 +117,16 @@ impl SessionView {
         }));
         remote.request_video(primary as u32, MAX_FPS, 0);
         let files = crate::files_ui::install(&window, remote.files(), tokio::runtime::Handle::current(), &session_name);
+        let terminals: Rc<RefCell<Vec<Rc<TerminalView>>>> = Rc::default();
+        let forwards: Rc<RefCell<Vec<Forward>>> = Rc::default();
+        let tools = (remote.terminals(), remote.tunnels());
         let remote = Rc::new(RefCell::new(Some(remote)));
         let display = Rc::new(Cell::new(primary as u32));
 
         // Session end: reported from a worker thread, handled here.
         let finish = {
+            let terminals = terminals.clone();
+            let forwards = forwards.clone();
             let weak = weak.clone();
             let remote = remote.clone();
             let on_closed = on_closed.clone();
@@ -127,6 +136,10 @@ impl SessionView {
                     return;
                 }
                 remote.borrow_mut().take();
+                for t in terminals.borrow_mut().drain(..) {
+                    t.close();
+                }
+                forwards.borrow_mut().clear();
                 if let Some(w) = weak.upgrade() {
                     let _ = w.hide();
                 }
@@ -240,11 +253,21 @@ impl SessionView {
             let weak = weak.clone();
             let cursor = cursor.clone();
             let remote = remote.clone();
+            let clipboard = clipboard.clone();
             window.window().on_winit_window_event(move |_, event| {
                 if let Some(w) = weak.upgrade() {
                     chrome::observe!(w, cursor, event);
                 }
                 match event {
+                    // Sheets and menus of the session window take the keyboard
+                    // themselves; everything else goes to the remote machine.
+                    WindowEvent::KeyboardInput { .. }
+                        if weak
+                            .upgrade()
+                            .is_some_and(|w| w.get_files_open() || w.get_ports_open() || w.get_tools_open()) =>
+                    {
+                        EventResult::Propagate
+                    }
                     WindowEvent::KeyboardInput { event, .. } => {
                         // F11 toggles full screen locally.
                         if event.state == ElementState::Pressed
@@ -305,16 +328,121 @@ impl SessionView {
         }
 
         window.show()?;
-        Ok(Rc::new(Self { _window: window, remote, _poll_closed: poll_closed, _files: files }))
+        // Terminal.
+        {
+            let (term_client, _) = &tools;
+            let term_client = term_client.clone();
+            let terminals = terminals.clone();
+            let look = look.clone();
+            let clipboard = clipboard.clone();
+            let host = session_name.clone();
+            window.on_open_terminal(move || {
+                terminals.borrow_mut().retain(|t| t.is_open());
+                match TerminalView::open(&term_client, &host, &look, clipboard.clone()) {
+                    Ok(view) => terminals.borrow_mut().push(view),
+                    Err(e) => tracing::warn!("cannot open terminal window: {e}"),
+                }
+            });
+        }
+        // Port forwarding.
+        {
+            let (_, tunnels) = tools;
+            let weak = window.as_weak();
+            let forwards = forwards.clone();
+            let host = session_name.clone();
+            let rt = tokio::runtime::Handle::current();
+            window.on_add_forward(move || {
+                let Some(w) = weak.upgrade() else { return };
+                let m = w.global::<Messages>();
+                let port_text = w.get_forward_local().trim().to_owned();
+                let port: u16 = if port_text.is_empty() {
+                    0
+                } else {
+                    match port_text.parse() {
+                        Ok(p) if p > 0 => p,
+                        _ => return w.set_forward_error(m.invoke_bad_port()),
+                    }
+                };
+                let target = w.get_forward_target().trim().to_owned();
+                let valid_target = target
+                    .rsplit_once(':')
+                    .is_some_and(|(h, p)| !h.is_empty() && p.parse::<u16>().is_ok_and(|p| p > 0));
+                if !valid_target {
+                    return w.set_forward_error(m.invoke_bad_target());
+                }
+                w.set_forward_error(slint::SharedString::new());
+                let local = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+                let task = {
+                    let tunnels = tunnels.clone();
+                    let target = target.clone();
+                    rt.spawn(async move { tunnels.forward(local, target).await })
+                };
+                let weak = weak.clone();
+                let forwards = forwards.clone();
+                let host = host.clone();
+                let _ = slint::spawn_local(async move {
+                    let result = task.await;
+                    let Some(w) = weak.upgrade() else { return };
+                    let m = w.global::<Messages>();
+                    match result {
+                        Ok(Ok(forward)) => {
+                            forwards.borrow_mut().push(forward);
+                            w.set_forward_local(slint::SharedString::new());
+                            w.set_forward_target(slint::SharedString::new());
+                            show_forwards(&w, &forwards.borrow(), &host);
+                        }
+                        Ok(Err(e)) => w.set_forward_error(m.invoke_forward_failed(e.to_string().into())),
+                        Err(e) => w.set_forward_error(m.invoke_forward_failed(e.to_string().into())),
+                    }
+                });
+            });
+        }
+        {
+            let weak = window.as_weak();
+            let forwards = forwards.clone();
+            let host = session_name.clone();
+            window.on_remove_forward(move |i| {
+                let Some(w) = weak.upgrade() else { return };
+                let mut list = forwards.borrow_mut();
+                if (i as usize) < list.len() {
+                    list.remove(i as usize);
+                }
+                show_forwards(&w, &list, &host);
+            });
+        }
+
+        Ok(Rc::new(Self {
+            _window: window,
+            remote,
+            _poll_closed: poll_closed,
+            _files: files,
+            terminals,
+            _forwards: forwards,
+        }))
     }
 
     pub fn apply_look(&self, look: &Look) {
         chrome::apply!(self._window, look);
+        for t in self.terminals.borrow().iter() {
+            t.apply_look(look);
+        }
     }
 
     pub fn is_open(&self) -> bool {
         self.remote.borrow().is_some()
     }
+}
+
+fn show_forwards(window: &SessionWindow, forwards: &[Forward], host: &str) {
+    let m = window.global::<Messages>();
+    let rows: Vec<ForwardRow> = forwards
+        .iter()
+        .map(|f| ForwardRow {
+            title: m.invoke_forward_title(f.local_addr().port() as i32, f.target().into()),
+            subtitle: m.invoke_forward_subtitle(host.into()),
+        })
+        .collect();
+    window.set_forwards(ModelRc::new(VecModel::from(rows)));
 }
 
 fn close_remote(remote: &Rc<RefCell<Option<Remote>>>) {

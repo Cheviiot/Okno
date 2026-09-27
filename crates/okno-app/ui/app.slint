@@ -40,6 +40,25 @@ export struct TransferRow {
     upload: bool,
 }
 
+export struct TermRun {
+    row: int,
+    col: int,
+    len: int,
+    text: string,
+    fg: color,
+    default-fg: bool,
+    bg: color,
+    has-bg: bool,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+}
+
+export struct ForwardRow {
+    title: string,
+    subtitle: string,
+}
+
 export enum DialogKind { none, connecting, trust-new, trust-changed, login }
 
 component DevicesPage inherits KPage {
@@ -536,7 +555,7 @@ component SessionBar inherits KHeaderBar {
     in property <[string]> displays;
     in-out property <int> display;
     in property <bool> fullscreen;
-    callback open-files;
+    callback open-tools;
     callback display-selected(int);
     callback toggle-fullscreen;
     callback disconnect;
@@ -550,9 +569,9 @@ component SessionBar inherits KHeaderBar {
         selected => { root.display-selected(self.current-index); }
     }
     KIconButton {
-        icon: Icons.folder;
-        tooltip: @tr("Files");
-        clicked => { root.open-files(); }
+        icon: Icons.more;
+        tooltip: @tr("Tools");
+        clicked => { root.open-tools(); }
     }
     KIconButton {
         icon: root.fullscreen ? Icons.unfullscreen : Icons.fullscreen;
@@ -660,6 +679,16 @@ export component SessionWindow inherits KAppWindow {
     callback files-up;
     callback files-activate(int);
     callback files-open-transfer(int);
+
+    in-out property <bool> tools-open;
+    in-out property <bool> ports-open;
+    in property <[ForwardRow]> forwards;
+    in-out property <string> forward-local;
+    in-out property <string> forward-target;
+    in property <string> forward-error;
+    callback open-terminal;
+    callback add-forward;
+    callback remove-forward(int);
     in property <image> frame;
     in property <bool> has-frame;
     in property <string> status;
@@ -688,7 +717,7 @@ export component SessionWindow inherits KAppWindow {
         displays: root.displays;
         display <=> root.display;
         fullscreen: false;
-        open-files => { root.files-open = true; root.files-opened(); }
+        open-tools => { root.tools-open = !root.tools-open; }
         display-selected(i) => { root.display-selected(i); }
         toggle-fullscreen => { root.toggle-fullscreen(); }
         disconnect => { root.disconnect(); }
@@ -761,12 +790,115 @@ export component SessionWindow inherits KAppWindow {
         displays: root.displays;
         display <=> root.display;
         fullscreen: true;
-        open-files => { root.reveal = false; root.files-open = true; root.files-opened(); }
+        open-tools => { root.tools-open = !root.tools-open; }
         drop-shadow-blur: 12px;
         drop-shadow-color: #00000060;
         display-selected(i) => { root.display-selected(i); }
         toggle-fullscreen => { root.reveal = false; root.toggle-fullscreen(); }
         disconnect => { root.disconnect(); }
+    }
+
+    // Tools menu under the header bar button.
+    if root.tools-open: TouchArea {
+        clicked => { root.tools-open = false; }
+    }
+    if root.tools-open: Rectangle {
+        x: parent.width - self.width - 200px;
+        y: 44px;
+        width: 240px;
+        height: tools-list.preferred-height;
+        background: Theme.popover-bg;
+        border-radius: Theme.radius-card;
+        border-width: 1px;
+        border-color: Theme.dark ? #00000066 : #00000612;
+        drop-shadow-blur: 12px;
+        drop-shadow-offset-y: 2px;
+        drop-shadow-color: #00000040;
+        tools-list := VerticalLayout {
+            padding: 6px;
+            for item[i] in [
+                { title: @tr("Files"), icon: Icons.folder },
+                { title: @tr("Terminal"), icon: Icons.terminal },
+                { title: @tr("Port Forwarding"), icon: Icons.ports },
+            ]: Rectangle {
+                height: 36px;
+                border-radius: Theme.radius-control;
+                background: tarea.has-hover ? Theme.control : transparent;
+                accessible-role: button;
+                accessible-label: item.title;
+                tarea := TouchArea {
+                    clicked => {
+                        root.tools-open = false;
+                        root.reveal = false;
+                        if i == 0 { root.files-open = true; root.files-opened(); }
+                        else if i == 1 { root.open-terminal(); }
+                        else { root.ports-open = true; }
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    spacing: 12px;
+                    KIcon { source: item.icon; }
+                    KText { text: item.title; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+
+    if root.ports-open: KSheet {
+        title: @tr("Port Forwarding");
+        sheet-width: 560px;
+        sheet-height: 540px;
+        closed => { root.ports-open = false; }
+        KPage {
+            KGroup {
+                title: @tr("New Forward");
+                description: @tr("Connections to the local port reach the address as seen from {}.", root.host-name);
+                KEntryRow {
+                    title: @tr("Local Port");
+                    text <=> root.forward-local;
+                    first: true;
+                }
+                KEntryRow {
+                    title: @tr("Remote Address, e.g. localhost:5432");
+                    text <=> root.forward-target;
+                    error: root.forward-error != "";
+                    last: true;
+                    accepted => { root.add-forward(); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                KCaption {
+                    text: root.forward-error;
+                    color: Theme.destructive-text;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                KButton {
+                    text: @tr("Add");
+                    primary: true;
+                    enabled: root.forward-target != "";
+                    clicked => { root.add-forward(); }
+                }
+            }
+            if root.forwards.length > 0: KGroup {
+                title: @tr("Active Forwards");
+                for f[i] in root.forwards: KRow {
+                    has-icon: true;
+                    icon: Icons.ports;
+                    title: f.title;
+                    subtitle: f.subtitle;
+                    mono-subtitle: false;
+                    last: i == root.forwards.length - 1;
+                    KIconButton {
+                        icon: Icons.trash;
+                        tooltip: @tr("Remove");
+                        clicked => { root.remove-forward(i); }
+                    }
+                }
+            }
+        }
     }
 
     if root.files-open: KSheet {
@@ -792,6 +924,115 @@ export component SessionWindow inherits KAppWindow {
     function report() {
         if root.has-frame && video.dw > 0 && video.dh > 0 {
             root.pointer-moved((area.mouse-x - video.ox) / video.dw, (area.mouse-y - video.oy) / video.dh);
+        }
+    }
+}
+
+// Remote shell, like GNOME Console.
+export component TerminalWindow inherits KAppWindow {
+    in property <string> term-title;
+    in property <[TermRun]> runs;
+    in property <int> cursor-row;
+    in property <int> cursor-col;
+    in property <bool> cursor-visible: true;
+    in property <bool> exited;
+    in property <string> status;
+    callback key(string, bool, bool, bool);
+    callback resized(int, int);
+    callback scrolled(int);
+
+    title: term-title;
+    preferred-width: 860px;
+    preferred-height: 540px;
+    min-width: 360px;
+    min-height: 240px;
+
+    property <color> term-bg: Theme.dark ? #1e1e1e : #ffffff;
+    property <length> font-size: 14.67px;
+
+    VerticalLayout {
+        KHeaderBar {
+            title: root.term-title;
+            bg: root.term-bg;
+        }
+        screen := Rectangle {
+            background: root.term-bg;
+            clip: true;
+            measure := Text {
+                visible: false;
+                text: "MMMMMMMMMM";
+                font-family: Theme.mono-family;
+                font-size: root.font-size;
+            }
+            property <length> cw: measure.preferred-width / 10;
+            property <length> ch: measure.preferred-height;
+            property <int> cols: max(2, floor((self.width - 20px) / max(1px, cw)));
+            property <int> rows: max(2, floor((self.height - 12px) / max(1px, ch)));
+            changed cols => { root.resized(self.cols, self.rows); }
+            changed rows => { root.resized(self.cols, self.rows); }
+            init => { root.resized(self.cols, self.rows); }
+
+            Rectangle {
+                x: 10px;
+                y: 6px;
+                for r in root.runs: Rectangle {
+                    x: r.col * screen.cw;
+                    y: r.row * screen.ch;
+                    width: r.len * screen.cw;
+                    height: screen.ch;
+                    background: r.has-bg ? r.bg : transparent;
+                    Text {
+                        x: 0;
+                        text: r.text;
+                        color: r.default-fg ? Theme.fg : r.fg;
+                        font-family: Theme.mono-family;
+                        font-size: root.font-size;
+                        font-weight: r.bold ? 700 : 400;
+                        font-italic: r.italic;
+                        vertical-alignment: center;
+                    }
+                    if r.underline: Rectangle {
+                        y: parent.height - 2px;
+                        height: 1px;
+                        background: r.default-fg ? Theme.fg : r.fg;
+                    }
+                }
+                if root.cursor-visible && !root.exited: Rectangle {
+                    x: root.cursor-col * screen.cw;
+                    y: root.cursor-row * screen.ch;
+                    width: screen.cw;
+                    height: screen.ch;
+                    background: keys.has-focus ? Theme.fg.transparentize(35%) : transparent;
+                    border-width: keys.has-focus ? 0px : 1px;
+                    border-color: Theme.fg;
+                }
+            }
+            TouchArea {
+                mouse-cursor: MouseCursor.text;
+                clicked => { keys.focus(); }
+                scroll-event(e) => {
+                    root.scrolled(e.delta-y > 0 ? 3 : e.delta-y < 0 ? -3 : 0);
+                    accept
+                }
+            }
+            keys := FocusScope {
+                init => { self.focus(); }
+                key-pressed(e) => {
+                    root.key(e.text, e.modifiers.control, e.modifiers.alt, e.modifiers.shift);
+                    accept
+                }
+            }
+            if root.exited: Rectangle {
+                y: parent.height - self.height;
+                height: 44px;
+                background: Theme.accent.transparentize(15%);
+                KText {
+                    text: root.status;
+                    color: Theme.accent-fg;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
         }
     }
 }
@@ -840,4 +1081,11 @@ export global Messages {
     pure public function uploaded() -> string { @tr("Sent") }
     pure public function transfer-failed(e: string) -> string { @tr("Failed: {}", e) }
     pure public function choose-files() -> string { @tr("Choose Files to Send") }
+    pure public function terminal-title(host: string) -> string { @tr("Terminal — {}", host) }
+    pure public function terminal-exited(code: int) -> string { @tr("The shell has ended with code {}", code) }
+    pure public function forward-title(port: int, target: string) -> string { @tr("localhost:{} → {}", port, target) }
+    pure public function forward-subtitle(host: string) -> string { @tr("through {}", host) }
+    pure public function bad-port() -> string { @tr("Enter a port between 1 and 65535, or leave it empty for any free port") }
+    pure public function bad-target() -> string { @tr("Enter the address as host:port") }
+    pure public function forward-failed(e: string) -> string { @tr("Cannot listen: {}", e) }
 }

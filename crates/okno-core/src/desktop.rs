@@ -13,6 +13,8 @@ use okno_proto::{ClipboardText, Codec, Display, VideoFrame, VideoStart};
 
 use crate::files::FileService;
 use crate::host::{BoxFuture, HostSession, SessionHandler};
+use crate::terminal::TerminalService;
+use crate::tunnel::TunnelService;
 
 pub const SERVICE_DESKTOP: &str = "desktop";
 
@@ -60,6 +62,8 @@ impl Drop for TaskGuard {
 async fn serve(desktop: Arc<dyn Desktop>, incoming: PathBuf, mut session: HostSession) -> Result<(), String> {
     let mut stream: Option<Streamer> = None;
     let mut files = FileService::new(session.sender.clone(), incoming);
+    let mut terminals = TerminalService::new(session.sender.clone());
+    let mut tunnels = TunnelService::new(session.sender.clone());
 
     // Clipboard: host copies go to the client, client texts to the host.
     let clipboard = desktop.clipboard();
@@ -85,6 +89,8 @@ async fn serve(desktop: Arc<dyn Desktop>, incoming: PathBuf, mut session: HostSe
         match msg {
             Ok(Msg::Input(event)) => desktop.inject(event),
             Ok(Msg::File(request)) => files.handle(request).await,
+            Ok(Msg::Terminal(request)) => terminals.handle(request).await,
+            Ok(Msg::Tunnel(request)) => tunnels.handle(request).await,
             Ok(Msg::Clipboard(c)) => {
                 if let Some(link) = &clipboard {
                     if c.text.len() <= okno_desktop::MAX_CLIPBOARD {

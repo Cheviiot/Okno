@@ -34,10 +34,10 @@ plaintext = channel u8 || flags u8 || fragment  (flags bit0 = FIN)
 | Канал | № | Сообщения |
 |---|---|---|
 | Control | 0 | Hello, Login, HostInfo, Ping, Clipboard, Video/AudioControl, Stats |
-| Input | 1 | InputEvent |
+| Input | 1 | InputEvent, Terminal |
 | Audio | 2 | AudioPacket |
 | Video | 3 | VideoFrame (очередь 3 кадра, лишние отбрасываются) |
-| Bulk | 4 | File, Terminal, Tunnel |
+| Bulk | 4 | File, Tunnel |
 
 ## Сеанс
 
@@ -93,6 +93,18 @@ plaintext = channel u8 || flags u8 || fragment  (flags bit0 = FIN)
 показываются. Отправленные файлы попадают в «Загрузки» хоста под свободным
 именем (`имя (2).ext`), пишутся в `имя.okno-part` и переименовываются только
 после совпадения SHA-256. Куски по 256 КиБ идут по каналу Bulk.
+
+## Терминал и проброс портов
+
+```text
+терминал:  C Open{cols,rows} → H Data… ; C Data (клавиши), C Resize, C Exit (убить)
+           H Exit(code) по завершении оболочки
+туннель:   C Open("host:port") → H Opened(bool); Data в обе стороны; Closed с любой стороны
+```
+
+Терминал — PTY на хосте с оболочкой пользователя (`$SHELL`; PowerShell на
+Windows), `TERM=xterm-256color`. Туннель: клиент слушает локальный порт, каждое
+соединение — отдельный `id`; хост подключается к адресу так, как видит его сам.
 
 ## Обнаружение
 

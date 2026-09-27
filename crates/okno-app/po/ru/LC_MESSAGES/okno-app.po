@@ -438,3 +438,54 @@ msgstr "Ошибка: {}"
 
 msgid "Choose Files to Send"
 msgstr "Выберите файлы для отправки"
+
+msgid "Tools"
+msgstr "Инструменты"
+
+msgid "Terminal"
+msgstr "Терминал"
+
+msgid "Port Forwarding"
+msgstr "Проброс портов"
+
+msgid "New Forward"
+msgstr "Новый проброс"
+
+msgid "Connections to the local port reach the address as seen from {}."
+msgstr "Подключения к локальному порту попадают на адрес так, как его видит {}."
+
+msgid "Local Port"
+msgstr "Локальный порт"
+
+msgid "Remote Address, e.g. localhost:5432"
+msgstr "Удалённый адрес, например localhost:5432"
+
+msgid "Add"
+msgstr "Добавить"
+
+msgid "Active Forwards"
+msgstr "Активные пробросы"
+
+msgid "Remove"
+msgstr "Удалить"
+
+msgid "Terminal — {}"
+msgstr "Терминал — {}"
+
+msgid "The shell has ended with code {}"
+msgstr "Оболочка завершилась с кодом {}"
+
+msgid "localhost:{} → {}"
+msgstr "localhost:{} → {}"
+
+msgid "through {}"
+msgstr "через {}"
+
+msgid "Enter a port between 1 and 65535, or leave it empty for any free port"
+msgstr "Укажите порт от 1 до 65535 или оставьте поле пустым для любого свободного"
+
+msgid "Enter the address as host:port"
+msgstr "Укажите адрес в виде хост:порт"
+
+msgid "Cannot listen: {}"
+msgstr "Не удалось открыть порт: {}"

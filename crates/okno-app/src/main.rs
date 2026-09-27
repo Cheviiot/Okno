@@ -7,6 +7,7 @@ mod files_ui;
 mod host;
 mod keys;
 mod session;
+mod terminal_ui;
 
 slint::include_modules!();
 

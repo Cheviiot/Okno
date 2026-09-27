@@ -59,10 +59,11 @@ impl Channel {
     pub fn of(message: &envelope::Msg) -> Self {
         use envelope::Msg;
         match message {
-            Msg::Input(_) => Self::Input,
+            // Keystrokes and echo must not wait behind file transfers.
+            Msg::Input(_) | Msg::Terminal(_) => Self::Input,
             Msg::Audio(_) => Self::Audio,
             Msg::Video(_) => Self::Video,
-            Msg::File(_) | Msg::Terminal(_) | Msg::Tunnel(_) => Self::Bulk,
+            Msg::File(_) | Msg::Tunnel(_) => Self::Bulk,
             _ => Self::Control,
         }
     }

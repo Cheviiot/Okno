@@ -9,6 +9,8 @@ pub mod endpoint;
 pub mod files;
 pub mod host;
 pub mod remote;
+pub mod terminal;
+pub mod tunnel;
 
 pub use config::{ClientConfig, Config, HostConfig, Store};
 pub use endpoint::Endpoint;

@@ -25,6 +25,7 @@ sys-locale = "0.3"
 arboard = "3"
 dirs.workspace = true
 if-addrs.workspace = true
+vt100 = "0.16"
 slint = { version = "1.18", features = ["unstable-winit-030"] }
 
 futures-util = "0.3"
