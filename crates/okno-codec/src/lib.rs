@@ -8,7 +8,7 @@
 use openh264::OpenH264API;
 use openh264::decoder::Decoder;
 use openh264::encoder::{
-    BitRate, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, RateControlMode, UsageType,
+    BitRate, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, QpRange, RateControlMode, UsageType,
 };
 use openh264::formats::{BgraSliceU8, RgbaSliceU8, YUVBuffer, YUVSource};
 
@@ -151,12 +151,27 @@ impl VideoEncoder {
     }
 }
 
+/// Coarsest quantiser allowed for a bitrate. A generous link (LAN) keeps
+/// text sharp even when the picture changes a lot, at the cost of briefly
+/// overshooting the bitrate; a slow one may blur instead of stalling.
+fn max_qp(bitrate_kbps: u32) -> u8 {
+    match bitrate_kbps {
+        40_000.. => 24,
+        15_000.. => 30,
+        _ => 38,
+    }
+}
+
 fn make_encoder(settings: EncoderSettings) -> Result<Encoder, CodecError> {
     let fps = settings.max_fps.clamp(1, 120);
     let config = EncoderConfig::new()
         .usage_type(UsageType::ScreenContentRealTime)
         .rate_control_mode(RateControlMode::Bitrate)
         .bitrate(BitRate::from_bps(settings.bitrate_kbps.clamp(100, 100_000) * 1000))
+        .qp(QpRange::new(10, max_qp(settings.bitrate_kbps)))
+        // Both only log warnings for screen content.
+        .adaptive_quantization(false)
+        .background_detection(false)
         .max_frame_rate(FrameRate::from_hz(fps as f32))
         .skip_frames(true)
         // A periodic keyframe heals any decoder desync within 10 s.

@@ -3957,7 +3957,7 @@ dependencies = [
 
 [[package]]
 name = "okno-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3986,7 +3986,7 @@ dependencies = [
 
 [[package]]
 name = "okno-audio"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cpal",
  "opus",
@@ -3997,7 +3997,7 @@ dependencies = [
 
 [[package]]
 name = "okno-auth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "argon2",
  "ipnet",
@@ -4012,7 +4012,7 @@ dependencies = [
 
 [[package]]
 name = "okno-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -4031,7 +4031,7 @@ dependencies = [
 
 [[package]]
 name = "okno-codec"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "openh264",
  "thiserror 2.0.21",
@@ -4039,7 +4039,7 @@ dependencies = [
 
 [[package]]
 name = "okno-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "dirs",
@@ -4065,7 +4065,7 @@ dependencies = [
 
 [[package]]
 name = "okno-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "arboard",
  "ashpd",
@@ -4082,7 +4082,7 @@ dependencies = [
 
 [[package]]
 name = "okno-discovery"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "if-addrs 0.14.0",
  "mdns-sd",
@@ -4097,7 +4097,7 @@ dependencies = [
 
 [[package]]
 name = "okno-net"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hex",
  "okno-proto",
@@ -4111,7 +4111,7 @@ dependencies = [
 
 [[package]]
 name = "okno-proto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "prost",

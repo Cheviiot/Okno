@@ -40,6 +40,11 @@
     <category>RemoteAccess</category>
   </categories>
   <releases>
+    <release version="0.1.1" date="2026-09-27">
+      <description>
+        <p>Much better picture on a local network: a Maximum preset (60 fps, up to 80 Mbit/s) by default and sharper text. The chosen picture preset is remembered.</p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-09-27">
       <description>
         <p>First release.</p>

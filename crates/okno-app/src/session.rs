@@ -21,7 +21,10 @@ use crate::{ForwardRow, Messages, SessionWindow, keys};
 use okno_core::tunnel::Forward;
 
 /// Picture presets of the session menu: (frames per second, kbit/s).
-const PRESETS: [(u32, u32); 3] = [(30, 8_000), (30, 20_000), (60, 6_000)];
+/// Picture presets as (fps, kbit/s), in the order of the session menu:
+/// maximum for a LAN, sharp, and economical for Wi-Fi or a slow VPN. The
+/// host lowers the bitrate by itself when the link cannot keep up.
+const PRESETS: [(u32, u32); 3] = [(60, 80_000), (30, 40_000), (30, 8_000)];
 
 struct Frame {
     width: u32,
@@ -59,10 +62,13 @@ fn request(remote: &Remote, display: u32, virtual_size: Option<(u32, u32)>, (fps
     }
 }
 
-/// How the remote screen fits the window, and where to remember a change.
-pub struct Scaling {
+/// Viewing choices kept between sessions, and where to remember changes.
+pub struct ViewPrefs {
     pub scale_to_window: bool,
-    pub remember: Box<dyn Fn(bool)>,
+    /// Index into the picture presets.
+    pub quality: usize,
+    pub remember_scaling: Box<dyn Fn(bool)>,
+    pub remember_quality: Box<dyn Fn(usize)>,
 }
 
 impl SessionView {
@@ -72,13 +78,16 @@ impl SessionView {
         session: Session,
         look: &Look,
         clipboard: LocalClipboard,
-        scaling: Scaling,
+        prefs: ViewPrefs,
         on_closed: impl Fn(Option<String>) + 'static,
     ) -> Result<Rc<Self>, slint::PlatformError> {
         let window = SessionWindow::new()?;
         chrome::apply!(window, look);
-        window.set_scale_to_window(scaling.scale_to_window);
-        window.on_scaling_changed(move |on| (scaling.remember)(on));
+        window.set_scale_to_window(prefs.scale_to_window);
+        window.on_scaling_changed(prefs.remember_scaling);
+        let remember_quality = prefs.remember_quality;
+        let initial_quality = prefs.quality.min(PRESETS.len() - 1);
+        window.set_quality(initial_quality as i32);
         let session_name = session.host.device_name.clone();
         let cursor = Cursor::default();
         let messages = window.global::<Messages>();
@@ -143,8 +152,8 @@ impl SessionView {
             RemoteEvent::Error(e) => tracing::warn!("host reported: {e}"),
             _ => {}
         }));
-        let quality = Rc::new(Cell::new(0usize));
-        let (fps, kbps) = PRESETS[0];
+        let quality = Rc::new(Cell::new(initial_quality));
+        let (fps, kbps) = PRESETS[initial_quality];
         remote.request_video(primary as u32, fps, kbps);
         // Sound: on by default; OKNO_NO_SOUND=1 disables it (tests).
         let sound: Rc<RefCell<Option<okno_audio::Playback>>> = Rc::default();
@@ -261,7 +270,8 @@ impl SessionView {
             let virtual_size = virtual_size.clone();
             let quality = quality.clone();
             window.on_quality_selected(move |i| {
-                quality.set((i as usize).min(PRESETS.len() - 1));
+                quality.set((i.max(0) as usize).min(PRESETS.len() - 1));
+                remember_quality(quality.get());
                 if let Some(r) = remote.borrow().as_ref() {
                     request(r, display.get(), virtual_size.get(), PRESETS[quality.get()]);
                 }

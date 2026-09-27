@@ -19,7 +19,7 @@ use tokio::runtime::Handle;
 use crate::chrome::{self, Cursor, Look};
 use crate::clipboard::LocalClipboard;
 use crate::host::HostState;
-use crate::session::{Scaling, SessionView};
+use crate::session::{SessionView, ViewPrefs};
 use crate::{DeviceRow, DialogKind, MainWindow, Messages};
 
 const DISCOVERY_TIME: Duration = Duration::from_secs(3);
@@ -540,17 +540,26 @@ impl App {
         self.save_trust();
         let weak = Rc::downgrade(self);
         let remembering = weak.clone();
-        let scaling = Scaling {
-            scale_to_window: self.config.borrow().client.scale_to_window,
-            remember: Box::new(move |on| {
+        let remembering_quality = weak.clone();
+        let client = self.config.borrow().client.clone();
+        let prefs = ViewPrefs {
+            scale_to_window: client.scale_to_window,
+            quality: client.quality,
+            remember_scaling: Box::new(move |on| {
                 if let Some(app) = remembering.upgrade() {
                     app.config.borrow_mut().client.scale_to_window = on;
                     app.save_config();
                 }
             }),
+            remember_quality: Box::new(move |quality| {
+                if let Some(app) = remembering_quality.upgrade() {
+                    app.config.borrow_mut().client.quality = quality;
+                    app.save_config();
+                }
+            }),
         };
         let clipboard = self.clipboard.clone();
-        let opened = SessionView::open(session, &self.look.borrow(), clipboard, scaling, move |reason| {
+        let opened = SessionView::open(session, &self.look.borrow(), clipboard, prefs, move |reason| {
             let Some(app) = weak.upgrade() else { return };
             app.sessions.borrow_mut().retain(|s| s.is_open());
             let text = match reason {

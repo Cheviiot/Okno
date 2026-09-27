@@ -9,7 +9,7 @@ Okno — самостоятельная реализация идеи [SubnetDes
 написанная с нуля на Rust. Интерфейс общий на Slint и подстраивается под систему:
 в GNOME выглядит как Adwaita, в Windows 11 — как Fluent.
 
-> Статус: первый выпуск 0.1.0, ранняя версия. Работают подключение, вход,
+> Статус: ранняя версия (0.1.x). Работают подключение, вход,
 > обнаружение, экран и ввод, звук, буфер обмена, файлы, терминал, проброс
 > портов, виртуальный экран. Об ошибках пишите в
 > [Issues](https://github.com/Cheviiot/Okno/issues).
@@ -56,12 +56,14 @@ Tailscale) по умолчанию разрешены.
 ### Linux (x86_64, GNOME)
 
 ```sh
-tar xf okno-0.1.0-linux-x86_64.tar.zst && cd okno-0.1.0-linux-x86_64
+v=0.1.1
+curl -LO https://github.com/Cheviiot/Okno/releases/download/v$v/okno-$v-linux-x86_64.tar.zst
+tar xf okno-$v-linux-x86_64.tar.zst && cd okno-$v-linux-x86_64
 ./scripts/install.sh --prefix ~/.local --target-dir bin     # для себя, без sudo
 # или для всех: sudo ./scripts/install.sh --prefix /usr --target-dir bin
 ```
 
-Okno появится в меню приложений. Нужны PipeWire и `xdg-desktop-portal-gnome`
+Okno появится в меню приложений. Обновление — то же самое с новой версией. Нужны PipeWire и `xdg-desktop-portal-gnome`
 (в GNOME они есть). Если включён брандмауэр (firewalld, ufw), откройте порты
 **21200/tcp** и **21201/udp**.
 

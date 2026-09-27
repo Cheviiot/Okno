@@ -31,11 +31,13 @@ pub struct ClientConfig {
     /// Fit the remote screen into the window; otherwise show it pixel for
     /// pixel and pan with the pointer.
     pub scale_to_window: bool,
+    /// Picture preset of the session menu; 0 is the best (for a LAN).
+    pub quality: usize,
 }
 
 impl Default for ClientConfig {
     fn default() -> Self {
-        Self { last_username: String::new(), scale_to_window: true }
+        Self { last_username: String::new(), scale_to_window: true, quality: 0 }
     }
 }
 

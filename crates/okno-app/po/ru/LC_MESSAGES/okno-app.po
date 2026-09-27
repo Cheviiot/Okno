@@ -538,23 +538,23 @@ msgstr "Запомнить пароль"
 msgid "Picture"
 msgstr "Изображение"
 
-msgid "Balanced"
-msgstr "Сбалансированно"
+msgid "Maximum"
+msgstr "Максимальное"
 
-msgid "30 fps, up to 8 Mbit/s"
-msgstr "30 кадров/с, до 8 Мбит/с"
+msgid "60 fps, up to 80 Mbit/s: local network"
+msgstr "60 кадров/с, до 80 Мбит/с: локальная сеть"
 
 msgid "Sharp"
-msgstr "Чётко"
+msgstr "Чёткое"
 
-msgid "30 fps, up to 20 Mbit/s"
-msgstr "30 кадров/с, до 20 Мбит/с"
+msgid "30 fps, up to 40 Mbit/s"
+msgstr "30 кадров/с, до 40 Мбит/с"
 
-msgid "Smooth"
-msgstr "Плавно"
+msgid "Economical"
+msgstr "Экономное"
 
-msgid "60 fps, up to 6 Mbit/s"
-msgstr "60 кадров/с, до 6 Мбит/с"
+msgid "30 fps, up to 8 Mbit/s: Wi-Fi, slow VPN"
+msgstr "30 кадров/с, до 8 Мбит/с: Wi-Fi, медленный VPN"
 
 msgid "Ask Before Each Connection"
 msgstr "Спрашивать перед каждым подключением"

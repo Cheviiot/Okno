@@ -2,7 +2,7 @@
 # the Linux release archive built by .github/workflows/release.yml; fill in
 # the checksums from the first release and move it to Nivora.
 name='okno'
-version='0.1.0'
+version='0.1.1'
 release=1
 summary='Remote desktop for the local network'
 summary_ru='Удалённый рабочий стол для локальной сети'
