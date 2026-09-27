@@ -495,3 +495,39 @@ msgstr "Выключить звук"
 
 msgid "Play Sound"
 msgstr "Включить звук"
+
+msgid "Incoming Connections"
+msgstr "Входящие подключения"
+
+msgid "Changes restart remote control if it is on."
+msgstr "Изменения перезапускают удалённое управление, если оно включено."
+
+msgid "Port"
+msgstr "Порт"
+
+msgid "Allowed Networks, comma-separated"
+msgstr "Разрешённые сети через запятую"
+
+msgid "Received Files"
+msgstr "Полученные файлы"
+
+msgid "Change…"
+msgstr "Изменить…"
+
+msgid "{} is controlling this computer"
+msgstr "{} управляет этим компьютером"
+
+msgid "Connected from {} as “{}”. Disconnect it under This Computer if you did not expect this."
+msgstr "Подключение с {} под именем «{}». Если вы его не ждали, отключите его в разделе «Этот компьютер»."
+
+msgid "Invalid network list: {}"
+msgstr "Неверный список сетей: {}"
+
+msgid "Choose a Folder for Received Files"
+msgstr "Выберите папку для полученных файлов"
+
+msgid "Settings saved"
+msgstr "Параметры сохранены"
+
+msgid "Enter a port between 1 and 65535"
+msgstr "Укажите порт от 1 до 65535"

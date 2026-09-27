@@ -9,6 +9,8 @@ mod clipboard;
 mod files_ui;
 mod host;
 mod keys;
+mod notify;
+mod picker;
 mod session;
 mod terminal_ui;
 

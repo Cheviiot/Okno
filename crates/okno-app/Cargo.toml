@@ -32,7 +32,7 @@ slint = { version = "1.18", features = ["unstable-winit-030"] }
 futures-util = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.13", default-features = false, features = ["async-io", "settings", "file_chooser"] }
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "settings", "file_chooser", "notification"] }
 
 [target.'cfg(windows)'.dependencies]
 rfd = { version = "0.15", default-features = false }

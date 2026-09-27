@@ -50,6 +50,8 @@ pub struct HostConfig {
     pub credentials: Option<Credentials>,
     /// Linux: XDG portal restore token, so screen sharing is not asked again.
     pub portal_restore_token: Option<String>,
+    /// Where files sent by clients are saved; Downloads when unset.
+    pub incoming_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for HostConfig {
@@ -62,6 +64,7 @@ impl Default for HostConfig {
             discoverable: true,
             credentials: None,
             portal_restore_token: None,
+            incoming_dir: None,
         }
     }
 }

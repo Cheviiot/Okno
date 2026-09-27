@@ -4,7 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use okno_auth::Credentials;
+use okno_auth::{AllowList, Credentials};
 use okno_core::desktop::{DesktopHandler, SERVICE_DESKTOP};
 use okno_core::host::{Host, HostEvent, HostSettings, SessionInfo};
 use okno_desktop::{DesktopError, OpenOptions};
@@ -31,6 +31,7 @@ pub fn init(app: &Rc<App>) {
     drop(config);
     refresh_login(app);
     show_status(app);
+    show_settings(app);
 
     let weak = Rc::downgrade(app);
     w.on_host_toggle(move |on| {
@@ -64,12 +65,74 @@ pub fn init(app: &Rc<App>) {
         }
     });
 
+    let weak = Rc::downgrade(app);
+    w.on_host_port_committed(move |text| {
+        let Some(app) = weak.upgrade() else { return };
+        match text.trim().parse::<u16>() {
+            Ok(port) if port > 0 => {
+                app.config.borrow_mut().host.port = port;
+                settings_changed(&app);
+            }
+            _ => app.window.set_settings_error(messages(&app).invoke_bad_host_port()),
+        }
+    });
+    let weak = Rc::downgrade(app);
+    w.on_host_networks_committed(move |text| {
+        let Some(app) = weak.upgrade() else { return };
+        match AllowList::parse(text.split(',').filter(|s| !s.trim().is_empty())) {
+            Ok(list) if !list.0.is_empty() => {
+                app.config.borrow_mut().host.allowed_networks = list;
+                settings_changed(&app);
+            }
+            Ok(_) => app.window.set_settings_error(messages(&app).invoke_bad_networks("—".into())),
+            Err(e) => app.window.set_settings_error(messages(&app).invoke_bad_networks(e.to_string().into())),
+        }
+    });
+    let weak = Rc::downgrade(app);
+    w.on_host_choose_incoming(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let title = messages(&app).invoke_choose_folder().to_string();
+        let task = app.rt.spawn(async move { crate::picker::pick_folder(&title).await });
+        let weak = Rc::downgrade(&app);
+        let _ = slint::spawn_local(async move {
+            let Ok(Some(dir)) = task.await else { return };
+            let Some(app) = weak.upgrade() else { return };
+            app.config.borrow_mut().host.incoming_dir = Some(dir);
+            settings_changed(&app);
+        });
+    });
+
     // Resume sharing if it was on when the app last ran.
     let config = app.config.borrow();
     if config.host.enabled && config.host.credentials.is_some() {
         drop(config);
         start(app);
     }
+}
+
+fn show_settings(app: &App) {
+    let config = app.config.borrow();
+    let w = &app.window;
+    let port = config.host.port.to_string();
+    let networks = config.host.allowed_networks.0.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+    w.set_host_port(port.as_str().into());
+    w.set_host_saved_port(port.into());
+    w.set_host_networks(networks.as_str().into());
+    w.set_host_saved_networks(networks.into());
+    let incoming = config.host.incoming_dir.clone().unwrap_or_else(okno_core::files::FileService::default_incoming);
+    w.set_host_incoming(incoming.to_string_lossy().as_ref().into());
+    w.set_settings_error(SharedString::new());
+}
+
+/// Saves host settings and restarts a running host so they take effect.
+fn settings_changed(app: &Rc<App>) {
+    app.save_config();
+    show_settings(app);
+    if app.host.running.borrow().is_some() {
+        stop(app);
+        start(app);
+    }
+    app.toast(messages(app).invoke_settings_saved(), false);
 }
 
 fn refresh_login(app: &App) {
@@ -174,7 +237,11 @@ fn start(app: &Rc<App>) {
             discoverable: settings_base.host.discoverable,
             services: vec![SERVICE_DESKTOP.into()],
         };
-        let handler = Arc::new(DesktopHandler::new(opened.desktop));
+        let mut handler = DesktopHandler::new(opened.desktop);
+        if let Some(dir) = settings_base.host.incoming_dir.clone() {
+            handler = handler.with_incoming(dir);
+        }
+        let handler = Arc::new(handler);
         drop(app);
         let started = rt.spawn(Host::start(identity, settings, handler)).await;
         let Some(app) = weak.upgrade() else { return };
@@ -202,7 +269,19 @@ fn start(app: &Rc<App>) {
                 return;
             }
             match event {
-                HostEvent::SessionOpened(info) => app.host.sessions.borrow_mut().push(info),
+                HostEvent::SessionOpened(info) => {
+                    // Whoever sits at this computer must know it is being
+                    // controlled.
+                    let m = messages(&app);
+                    crate::notify::show(
+                        &app.rt,
+                        &format!("okno-session-{}", info.id),
+                        m.invoke_connected_title(info.device_name.as_str().into()).into(),
+                        m.invoke_connected_body(info.peer.ip().to_string().into(), info.username.as_str().into())
+                            .into(),
+                    );
+                    app.host.sessions.borrow_mut().push(info);
+                }
                 HostEvent::SessionClosed { id, .. } => app.host.sessions.borrow_mut().retain(|s| s.id != id),
                 _ => {}
             }

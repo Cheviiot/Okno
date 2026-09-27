@@ -247,7 +247,16 @@ component SettingsContent inherits KPage {
     in-out property <string> device-name;
     in property <string> saved-name;
     in property <string> fingerprint;
+    in-out property <string> port;
+    in property <string> saved-port;
+    in-out property <string> networks;
+    in property <string> saved-networks;
+    in property <string> incoming;
+    in property <string> error;
     callback device-name-committed(string);
+    callback port-committed(string);
+    callback networks-committed(string);
+    callback choose-incoming;
 
     KGroup {
         title: @tr("This Device");
@@ -265,6 +274,41 @@ component SettingsContent inherits KPage {
             mono-subtitle: true;
             last: true;
         }
+    }
+
+    KGroup {
+        title: @tr("Incoming Connections");
+        description: @tr("Changes restart remote control if it is on.");
+        KEntryRow {
+            title: @tr("Port");
+            text <=> root.port;
+            first: true;
+            error: root.error != "" && root.port != root.saved-port;
+            show-apply: root.port != root.saved-port && root.port != "";
+            accepted => { root.port-committed(root.port); }
+            applied => { root.port-committed(root.port); }
+        }
+        KEntryRow {
+            title: @tr("Allowed Networks, comma-separated");
+            text <=> root.networks;
+            error: root.error != "" && root.networks != root.saved-networks;
+            show-apply: root.networks != root.saved-networks && root.networks != "";
+            accepted => { root.networks-committed(root.networks); }
+            applied => { root.networks-committed(root.networks); }
+        }
+        KRow {
+            title: @tr("Received Files");
+            subtitle: root.incoming;
+            last: true;
+            KButton {
+                text: @tr("Change…");
+                clicked => { root.choose-incoming(); }
+            }
+        }
+    }
+    if root.error != "": KCaption {
+        text: root.error;
+        color: Theme.destructive-text;
     }
 }
 
@@ -325,7 +369,16 @@ export component MainWindow inherits KAppWindow {
     in-out property <string> device-name;
     in property <string> saved-device-name;
     in property <string> version;
+    in-out property <string> host-port;
+    in property <string> host-saved-port;
+    in-out property <string> host-networks;
+    in property <string> host-saved-networks;
+    in property <string> host-incoming;
+    in property <string> settings-error;
     callback device-name-committed(string);
+    callback host-port-committed(string);
+    callback host-networks-committed(string);
+    callback host-choose-incoming;
     callback open-url(string);
 
     // Notifications
@@ -389,13 +442,22 @@ export component MainWindow inherits KAppWindow {
     if root.settings-open: KSheet {
         title: @tr("Preferences");
         sheet-width: 600px;
-        sheet-height: 420px;
+        sheet-height: 620px;
         closed => { root.settings-open = false; }
         SettingsContent {
             device-name <=> root.device-name;
             saved-name: root.saved-device-name;
             fingerprint: root.host-fingerprint;
+            port <=> root.host-port;
+            saved-port: root.host-saved-port;
+            networks <=> root.host-networks;
+            saved-networks: root.host-saved-networks;
+            incoming: root.host-incoming;
+            error: root.settings-error;
             device-name-committed(n) => { root.device-name-committed(n); }
+            port-committed(p) => { root.host-port-committed(p); }
+            networks-committed(n) => { root.host-networks-committed(n); }
+            choose-incoming => { root.host-choose-incoming(); }
         }
     }
 
@@ -1084,6 +1146,12 @@ export global Messages {
     pure public function device-subtitle(addr: string, os: string) -> string { @tr("{} · {}", addr, os) }
     pure public function forgotten() -> string { @tr("Device forgotten") }
     pure public function name-saved() -> string { @tr("Device name saved") }
+    pure public function connected-title(device: string) -> string { @tr("{} is controlling this computer", device) }
+    pure public function connected-body(peer: string, user: string) -> string { @tr("Connected from {} as “{}”. Disconnect it under This Computer if you did not expect this.", peer, user) }
+    pure public function bad-networks(e: string) -> string { @tr("Invalid network list: {}", e) }
+    pure public function choose-folder() -> string { @tr("Choose a Folder for Received Files") }
+    pure public function bad-host-port() -> string { @tr("Enter a port between 1 and 65535") }
+    pure public function settings-saved() -> string { @tr("Settings saved") }
 
     pure public function size(n: string, unit: int) -> string {
         unit == 0 ? @tr("{} B", n) : unit == 1 ? @tr("{} kB", n) : unit == 2 ? @tr("{} MB", n) : @tr("{} GB", n)
