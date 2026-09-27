@@ -18,6 +18,7 @@ okno-discovery.workspace = true
 okno-core.workspace = true
 okno-desktop.workspace = true
 png.workspace = true
+rpassword = "7"
 tokio = { workspace = true, features = ["signal"] }
 clap.workspace = true
 anyhow.workspace = true

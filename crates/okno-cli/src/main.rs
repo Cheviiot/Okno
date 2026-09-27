@@ -1,4 +1,4 @@
-use std::io::BufRead;
+use std::io::{BufRead, IsTerminal, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,8 +25,8 @@ struct Cli {
 enum Command {
     /// Show this device's name and fingerprint.
     Id,
-    /// Set the host login. The password is read from $OKNO_PASSWORD or the
-    /// first line of stdin.
+    /// Set the host login. The password is read from $OKNO_PASSWORD, asked
+    /// in a terminal, or taken from the first line of stdin.
     SetPassword {
         #[arg(long, default_value = "okno")]
         user: String,
@@ -113,9 +113,40 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// First run in a terminal: choose the login clients will use.
+fn ask_credentials() -> Result<Credentials> {
+    println!("This host has no login yet. Clients will need it to connect.");
+    print!("Username [okno]: ");
+    std::io::stdout().flush()?;
+    let mut user = String::new();
+    std::io::stdin().lock().read_line(&mut user)?;
+    let user = match user.trim() {
+        "" => "okno",
+        u => u,
+    }
+    .to_owned();
+    loop {
+        let password = rpassword::prompt_password("Password (8+ characters): ")?;
+        if rpassword::prompt_password("Repeat password: ")? != password {
+            println!("Passwords differ, try again.");
+            continue;
+        }
+        match Credentials::new(&user, &password) {
+            Ok(c) => {
+                println!("Login saved for “{user}”.");
+                return Ok(c);
+            }
+            Err(e) => println!("{e}"),
+        }
+    }
+}
+
 fn read_password() -> Result<String> {
     if let Ok(p) = std::env::var("OKNO_PASSWORD") {
         return Ok(p);
+    }
+    if std::io::stdin().is_terminal() {
+        return Ok(rpassword::prompt_password("Password: ")?);
     }
     let mut line = String::new();
     std::io::stdin().lock().read_line(&mut line)?;
@@ -124,8 +155,17 @@ fn read_password() -> Result<String> {
 
 async fn run_host(store: &Store, port: Option<u16>, test_pattern: bool) -> Result<()> {
     let mut config = store.load_config()?;
-    let credentials =
-        config.host.credentials.clone().context("no host login configured; run `okno-cli set-password` first")?;
+    let credentials = match config.host.credentials.clone() {
+        Some(c) => c,
+        None if std::io::stdin().is_terminal() => {
+            let c = ask_credentials()?;
+            config.host.credentials = Some(c.clone());
+            config.host.enabled = true;
+            store.save_config(&config)?;
+            c
+        }
+        None => bail!("no host login configured; run `okno-cli set-password` first"),
+    };
     let settings = HostSettings {
         device_name: config.device_name.clone(),
         port: port.unwrap_or(config.host.port),
