@@ -10,16 +10,18 @@ permissions:
 
 jobs:
   linux:
-    # An older base keeps the glibc requirement low for ALT p11 and friends.
-    runs-on: ubuntu-22.04
+    # glibc 2.38 like ALT p11, yet PipeWire headers new enough (>= 0.3.80)
+    # for the pipewire crate; Ubuntu 22.04's are too old.
+    runs-on: ubuntu-latest
+    container: fedora:39
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - name: Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev libdbus-1-dev libxkbcommon-dev \
-            libfontconfig-dev libfreetype-dev clang cmake nasm pkg-config zstd
+          dnf -y install git gcc gcc-c++ clang cmake nasm pkgconf-pkg-config zstd \
+            pipewire-devel dbus-devel fontconfig-devel freetype-devel libxkbcommon-devel \
+            wayland-devel libX11-devel opus-devel
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --release --locked -p okno-app -p okno-cli
       - name: Archive
