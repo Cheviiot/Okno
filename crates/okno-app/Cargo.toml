@@ -22,6 +22,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
 sys-locale = "0.3"
+arboard = "3"
 if-addrs.workspace = true
 slint = { version = "1.18", features = ["unstable-winit-030"] }
 

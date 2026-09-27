@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use okno_proto::input_event::Event;
 use okno_proto::{InputEvent, MouseButton};
+use tokio::sync::{mpsc, watch};
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO};
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
@@ -33,7 +34,10 @@ use windows_capture::settings::{
 };
 
 use crate::keymap::{KEY_PAUSE, evdev_to_scancode};
-use crate::{Capture, Desktop, DesktopError, DisplayInfo, FrameSlot, OpenedDesktop, PixelFormat, RawFrame};
+use crate::{
+    Capture, ClipboardLink, Desktop, DesktopError, DisplayInfo, FrameSlot, MAX_CLIPBOARD, OpenedDesktop, PixelFormat,
+    RawFrame,
+};
 
 /// Wheel units per pixel of smooth scrolling (one notch = 120 ≈ 48 px).
 const WHEEL_PER_PIXEL: f64 = 2.5;
@@ -48,6 +52,7 @@ pub struct WinDesktop {
     monitors: Vec<WinMonitor>,
     /// Serialises `SendInput` so events from one session stay in order.
     input: Mutex<()>,
+    clipboard: Option<ClipboardLink>,
 }
 
 // `Monitor` wraps an HMONITOR handle, which is valid from any thread.
@@ -86,7 +91,8 @@ impl WinDesktop {
         if monitors.is_empty() {
             return Err(DesktopError::Capture("no monitors found".into()));
         }
-        Ok(OpenedDesktop { desktop: Arc::new(Self { monitors, input: Mutex::new(()) }), restore_token: None })
+        let desktop = Self { monitors, input: Mutex::new(()), clipboard: clipboard_link() };
+        Ok(OpenedDesktop { desktop: Arc::new(desktop), restore_token: None })
     }
 
     fn send(&self, inputs: &[INPUT]) {
@@ -134,6 +140,10 @@ impl Desktop for WinDesktop {
         );
         let control = Handler::start_free_threaded(settings).map_err(|e| DesktopError::Capture(e.to_string()))?;
         Ok(Capture::new(slot, StopCapture(Some(control))))
+    }
+
+    fn clipboard(&self) -> Option<ClipboardLink> {
+        self.clipboard.clone()
     }
 
     fn inject(&self, event: InputEvent) {
@@ -198,6 +208,41 @@ impl Desktop for WinDesktop {
             }
         }
     }
+}
+
+/// Windows has no clipboard change notification without a window, so a
+/// thread polls it and applies texts from the remote side.
+fn clipboard_link() -> Option<ClipboardLink> {
+    let (copied_tx, copied) = watch::channel(None);
+    let (paste, mut requests) = mpsc::unbounded_channel::<String>();
+    std::thread::Builder::new()
+        .name("okno-clipboard".into())
+        .spawn(move || {
+            let Ok(mut clipboard) = arboard::Clipboard::new() else { return };
+            // Existing content is not "copied" in this session.
+            let mut last = clipboard.get_text().ok();
+            loop {
+                loop {
+                    match requests.try_recv() {
+                        Ok(text) => {
+                            let _ = clipboard.set_text(text.clone());
+                            last = Some(text);
+                        }
+                        Err(mpsc::error::TryRecvError::Empty) => break,
+                        Err(mpsc::error::TryRecvError::Disconnected) => return,
+                    }
+                }
+                if let Ok(text) = clipboard.get_text() {
+                    if last.as_ref() != Some(&text) && text.len() <= MAX_CLIPBOARD {
+                        copied_tx.send_replace(Some(Arc::from(text.as_str())));
+                        last = Some(text);
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        })
+        .ok()?;
+    Some(ClipboardLink { copied, paste })
 }
 
 struct Handler {

@@ -8,7 +8,7 @@ use okno_codec::{EncoderSettings, VideoEncoder};
 use okno_desktop::{Desktop, Taken};
 use okno_net::{Sender, TrySendError};
 use okno_proto::envelope::Msg;
-use okno_proto::{Codec, Display, VideoFrame, VideoStart};
+use okno_proto::{ClipboardText, Codec, Display, VideoFrame, VideoStart};
 
 use crate::host::{BoxFuture, HostSession, SessionHandler};
 
@@ -39,8 +39,34 @@ impl SessionHandler for DesktopHandler {
     }
 }
 
+/// Aborts a task when dropped.
+struct TaskGuard(tokio::task::JoinHandle<()>);
+
+impl Drop for TaskGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 async fn serve(desktop: Arc<dyn Desktop>, mut session: HostSession) -> Result<(), String> {
     let mut stream: Option<Streamer> = None;
+
+    // Clipboard: host copies go to the client, client texts to the host.
+    let clipboard = desktop.clipboard();
+    let _forward_copies = clipboard.as_ref().map(|link| {
+        let sender = session.sender.clone();
+        let mut copied = link.copied.clone();
+        TaskGuard(tokio::spawn(async move {
+            while copied.changed().await.is_ok() {
+                let text = copied.borrow_and_update().clone();
+                if let Some(text) = text {
+                    if sender.send(Msg::Clipboard(ClipboardText { text: text.to_string() })).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }))
+    });
     loop {
         let msg = tokio::select! {
             msg = session.receiver.recv() => msg,
@@ -48,6 +74,13 @@ async fn serve(desktop: Arc<dyn Desktop>, mut session: HostSession) -> Result<()
         };
         match msg {
             Ok(Msg::Input(event)) => desktop.inject(event),
+            Ok(Msg::Clipboard(c)) => {
+                if let Some(link) = &clipboard {
+                    if c.text.len() <= okno_desktop::MAX_CLIPBOARD {
+                        let _ = link.paste.send(c.text);
+                    }
+                }
+            }
             Ok(Msg::VideoStart(start)) => {
                 stream = None; // stop the previous one first
                 match Streamer::start(desktop.clone(), session.sender.clone(), start) {

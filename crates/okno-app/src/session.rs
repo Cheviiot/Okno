@@ -15,6 +15,7 @@ use slint::winit_030::{EventResult, WinitWindowAccessor};
 use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
 use crate::chrome::{self, Cursor, Look};
+use crate::clipboard::LocalClipboard;
 use crate::{Messages, SessionWindow, keys};
 
 const MAX_FPS: u32 = 30;
@@ -48,6 +49,7 @@ impl SessionView {
     pub fn open(
         session: Session,
         look: &Look,
+        clipboard: LocalClipboard,
         on_closed: impl Fn(Option<String>) + 'static,
     ) -> Result<Rc<Self>, slint::PlatformError> {
         let window = SessionWindow::new()?;
@@ -74,6 +76,10 @@ impl SessionView {
         let on_closed = Rc::new(on_closed);
         let closed_once = Rc::new(Cell::new(false));
 
+        // Last text exchanged either way, so a text is never echoed back.
+        let synced: Arc<Mutex<Option<String>>> = Arc::default();
+        let sink_synced = synced.clone();
+        let sink_clipboard = clipboard.clone();
         let sink_mailbox = mailbox.clone();
         let sink_window = weak.clone();
         let (closed_tx, closed_rx) = std::sync::mpsc::channel::<Option<String>>();
@@ -95,6 +101,10 @@ impl SessionView {
             RemoteEvent::Closed(reason) => {
                 let _ = closed_tx.send(reason);
                 let _ = sink_window.upgrade_in_event_loop(|_| {});
+            }
+            RemoteEvent::Clipboard(text) => {
+                *sink_synced.lock().unwrap() = Some(text.clone());
+                sink_clipboard.set(text);
             }
             RemoteEvent::Error(e) => tracing::warn!("host reported: {e}"),
             _ => {}
@@ -226,6 +236,7 @@ impl SessionView {
             let send = send.clone();
             let weak = weak.clone();
             let cursor = cursor.clone();
+            let remote = remote.clone();
             window.window().on_winit_window_event(move |_, event| {
                 if let Some(w) = weak.upgrade() {
                     chrome::observe!(w, cursor, event);
@@ -265,6 +276,20 @@ impl SessionView {
                     }
                     // Keys held while focus leaves (Alt+Tab) would stay stuck on
                     // the remote side.
+                    // Coming back to the session: hand over what was copied
+                    // locally meanwhile.
+                    WindowEvent::Focused(true) => {
+                        if let Some(text) = clipboard.get() {
+                            let mut last = synced.lock().unwrap();
+                            if last.as_ref() != Some(&text) && text.len() <= okno_desktop::MAX_CLIPBOARD {
+                                if let Some(r) = remote.borrow().as_ref() {
+                                    r.send_clipboard(text.clone());
+                                }
+                                *last = Some(text);
+                            }
+                        }
+                        EventResult::Propagate
+                    }
                     WindowEvent::Focused(false) => {
                         for code in std::mem::take(&mut *pressed.borrow_mut()) {
                             send(Event::Key(KeyEvent { evdev_code: code, pressed: false }));

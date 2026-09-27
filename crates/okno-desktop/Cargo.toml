@@ -18,7 +18,9 @@ tokio.workspace = true
 # without a runtime, such as the AccessKit thread of the UI.
 ashpd = { version = "0.13", default-features = false, features = ["async-io", "remote_desktop", "screencast", "clipboard"] }
 pipewire = "0.10"
+futures-util = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 windows-capture = "2.0"
+arboard = { version = "3", default-features = false }
 windows = { version = "0.62", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi", "Win32_Graphics_Gdi", "Win32_Foundation"] }

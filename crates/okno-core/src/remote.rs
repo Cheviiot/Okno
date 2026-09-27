@@ -73,6 +73,11 @@ impl Remote {
         let _ = self.sender.try_send(Msg::Input(event));
     }
 
+    /// Puts text on the remote clipboard.
+    pub fn send_clipboard(&self, text: String) {
+        let _ = self.sender.try_send(Msg::Clipboard(okno_proto::ClipboardText { text }));
+    }
+
     pub async fn close(self) {
         let _ = self.sender.send(Msg::Close(Close { reason: "closed by user".into() })).await;
         drop(self.sender);

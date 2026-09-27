@@ -17,6 +17,7 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tokio::runtime::Handle;
 
 use crate::chrome::{self, Cursor, Look};
+use crate::clipboard::LocalClipboard;
 use crate::host::HostState;
 use crate::session::SessionView;
 use crate::{DeviceRow, DialogKind, MainWindow, Messages};
@@ -41,6 +42,7 @@ pub struct App {
     searching: Cell<bool>,
     look: RefCell<Look>,
     cursor: Cursor,
+    clipboard: LocalClipboard,
 }
 
 thread_local! {
@@ -93,6 +95,7 @@ impl App {
             searching: Cell::new(false),
             look: RefCell::default(),
             cursor: Cursor::default(),
+            clipboard: LocalClipboard::new(),
         });
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
         app.install_chrome();
@@ -430,7 +433,7 @@ impl App {
 
         let session = pending.into_session();
         let weak = Rc::downgrade(self);
-        let opened = SessionView::open(session, &self.look.borrow(), move |reason| {
+        let opened = SessionView::open(session, &self.look.borrow(), self.clipboard.clone(), move |reason| {
             let Some(app) = weak.upgrade() else { return };
             app.sessions.borrow_mut().retain(|s| s.is_open());
             let text = match reason {

@@ -2,6 +2,7 @@
 
 mod app;
 mod chrome;
+mod clipboard;
 mod host;
 mod keys;
 mod session;

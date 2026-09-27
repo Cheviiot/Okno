@@ -5,7 +5,9 @@ use std::time::Duration;
 use okno_codec::{PixelFormat, RawFrame};
 use okno_proto::InputEvent;
 
-use crate::{Capture, Desktop, DesktopError, DisplayInfo, FrameSlot};
+use tokio::sync::{mpsc, watch};
+
+use crate::{Capture, ClipboardLink, Desktop, DesktopError, DisplayInfo, FrameSlot};
 
 /// Input events received by a [`TestDesktop`].
 pub type TestInputLog = Arc<Mutex<Vec<InputEvent>>>;
@@ -17,15 +19,38 @@ pub struct TestDesktop {
     height: u32,
     fps: u32,
     inputs: TestInputLog,
+    copied: watch::Sender<Option<Arc<str>>>,
+    pasted: Arc<Mutex<Vec<String>>>,
+    paste: mpsc::UnboundedSender<String>,
 }
 
 impl TestDesktop {
     pub fn new(width: u32, height: u32, fps: u32) -> Self {
-        Self { width, height, fps: fps.max(1), inputs: TestInputLog::default() }
+        let (copied, _) = watch::channel(None);
+        let pasted = Arc::new(Mutex::new(Vec::new()));
+        let (paste, mut requests) = mpsc::unbounded_channel::<String>();
+        let log = pasted.clone();
+        std::thread::spawn(move || {
+            while let Some(text) = requests.blocking_recv() {
+                tracing::info!("test desktop clipboard set: {text:?}");
+                log.lock().unwrap().push(text);
+            }
+        });
+        Self { width, height, fps: fps.max(1), inputs: TestInputLog::default(), copied, pasted, paste }
     }
 
     pub fn inputs(&self) -> TestInputLog {
         self.inputs.clone()
+    }
+
+    /// Simulates the host user copying text.
+    pub fn copy(&self, text: &str) {
+        self.copied.send_replace(Some(Arc::from(text)));
+    }
+
+    /// Texts the remote side put on this clipboard.
+    pub fn pasted(&self) -> Arc<Mutex<Vec<String>>> {
+        self.pasted.clone()
     }
 }
 
@@ -76,6 +101,10 @@ impl Desktop for TestDesktop {
             })
             .map_err(|e| DesktopError::Capture(e.to_string()))?;
         Ok(Capture::new(slot, StopOnDrop(stop)))
+    }
+
+    fn clipboard(&self) -> Option<ClipboardLink> {
+        Some(ClipboardLink { copied: self.copied.subscribe(), paste: self.paste.clone() })
     }
 
     fn inject(&self, event: InputEvent) {

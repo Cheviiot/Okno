@@ -24,6 +24,7 @@ pub use okno_codec::{PixelFormat, RawFrame};
 use okno_proto::InputEvent;
 pub use slot::{FrameSlot, Taken};
 pub use test_desktop::{TestDesktop, TestInputLog};
+use tokio::sync::{mpsc, watch};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DisplayInfo {
@@ -58,6 +59,18 @@ impl Capture {
     }
 }
 
+/// Largest clipboard text exchanged, in bytes.
+pub const MAX_CLIPBOARD: usize = 1024 * 1024;
+
+/// Connection to the host's text clipboard.
+#[derive(Clone)]
+pub struct ClipboardLink {
+    /// Text copied on the host (not text the link itself set).
+    pub copied: watch::Receiver<Option<Arc<str>>>,
+    /// Puts text on the host clipboard.
+    pub paste: mpsc::UnboundedSender<String>,
+}
+
 pub trait Desktop: Send + Sync + 'static {
     fn displays(&self) -> Vec<DisplayInfo>;
 
@@ -67,6 +80,11 @@ pub trait Desktop: Send + Sync + 'static {
     /// Queues an input event; never blocks. Events for unknown displays or
     /// keys are dropped.
     fn inject(&self, event: InputEvent);
+
+    /// The host clipboard, when the platform grants access.
+    fn clipboard(&self) -> Option<ClipboardLink> {
+        None
+    }
 }
 
 /// Options for opening the real desktop.
