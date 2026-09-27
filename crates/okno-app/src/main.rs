@@ -10,7 +10,7 @@ slint::include_modules!();
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_env("OKNO_LOG").unwrap_or_else(|_| "warn".into()))
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_env("OKNO_LOG").unwrap_or_else(|_| "warn,arboard=error".into()))
         .init();
 
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().worker_threads(4).build()?;
