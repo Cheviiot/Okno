@@ -1,0 +1,18 @@
+[package]
+name = "okno-audio"
+description = "Okno audio: system sound capture, Opus coding and playback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+opus = "0.4"
+thiserror.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+cpal = "0.18"

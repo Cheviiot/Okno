@@ -19,7 +19,7 @@ xvfb=$!
 trap 'kill $app $xvfb 2>/dev/null; rm -rf "$cfg"' EXIT
 sleep 1
 env -u WAYLAND_DISPLAY DISPLAY="$display" OKNO_CONFIG_DIR="$cfg" OKNO_UI_PAGE="$page" OKNO_LANG="$lang" \
-    OKNO_COLOR_SCHEME="$scheme" SLINT_BACKEND=winit-software XDG_CONFIG_HOME="$cfg" \
+    OKNO_COLOR_SCHEME="$scheme" OKNO_NO_SOUND=1 SLINT_BACKEND=winit-software XDG_CONFIG_HOME="$cfg" \
     target/debug/okno >/dev/null 2>&1 &
 app=$!
 sleep 4

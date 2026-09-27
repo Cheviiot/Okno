@@ -9,7 +9,7 @@ use okno_codec::{EncoderSettings, VideoEncoder};
 use okno_desktop::{Desktop, Taken};
 use okno_net::{Sender, TrySendError};
 use okno_proto::envelope::Msg;
-use okno_proto::{ClipboardText, Codec, Display, VideoFrame, VideoStart};
+use okno_proto::{AudioPacket, ClipboardText, Codec, Display, VideoFrame, VideoStart};
 
 use crate::files::FileService;
 use crate::host::{BoxFuture, HostSession, SessionHandler};
@@ -22,11 +22,18 @@ pub const SERVICE_DESKTOP: &str = "desktop";
 pub struct DesktopHandler {
     desktop: Arc<dyn Desktop>,
     incoming: PathBuf,
+    audio: okno_audio::Source,
 }
 
 impl DesktopHandler {
     pub fn new(desktop: Arc<dyn Desktop>) -> Self {
-        Self { desktop, incoming: FileService::default_incoming() }
+        Self { desktop, incoming: FileService::default_incoming(), audio: okno_audio::Source::System }
+    }
+
+    /// Where session sound comes from (a tone in tests).
+    pub fn with_audio(mut self, source: okno_audio::Source) -> Self {
+        self.audio = source;
+        self
     }
 
     /// Directory for files sent by clients.
@@ -46,7 +53,7 @@ impl SessionHandler for DesktopHandler {
     }
 
     fn run(&self, session: HostSession) -> BoxFuture {
-        Box::pin(serve(self.desktop.clone(), self.incoming.clone(), session))
+        Box::pin(serve(self.desktop.clone(), self.incoming.clone(), self.audio, session))
     }
 }
 
@@ -59,8 +66,15 @@ impl Drop for TaskGuard {
     }
 }
 
-async fn serve(desktop: Arc<dyn Desktop>, incoming: PathBuf, mut session: HostSession) -> Result<(), String> {
+async fn serve(
+    desktop: Arc<dyn Desktop>,
+    incoming: PathBuf,
+    audio_source: okno_audio::Source,
+    mut session: HostSession,
+) -> Result<(), String> {
     let mut stream: Option<Streamer> = None;
+    // Kept alive while enabled; dropping it stops the capture.
+    let mut _audio: Option<okno_audio::Capture> = None;
     let mut files = FileService::new(session.sender.clone(), incoming);
     let mut terminals = TerminalService::new(session.sender.clone());
     let mut tunnels = TunnelService::new(session.sender.clone());
@@ -89,6 +103,15 @@ async fn serve(desktop: Arc<dyn Desktop>, incoming: PathBuf, mut session: HostSe
         match msg {
             Ok(Msg::Input(event)) => desktop.inject(event),
             Ok(Msg::File(request)) => files.handle(request).await,
+            Ok(Msg::AudioControl(control)) => {
+                _audio = None;
+                if control.enabled {
+                    match start_audio(audio_source, session.sender.clone()) {
+                        Ok(capture) => _audio = Some(capture),
+                        Err(e) => tracing::warn!("sound capture unavailable: {e}"),
+                    }
+                }
+            }
             Ok(Msg::Terminal(request)) => terminals.handle(request).await,
             Ok(Msg::Tunnel(request)) => tunnels.handle(request).await,
             Ok(Msg::Clipboard(c)) => {
@@ -120,6 +143,20 @@ async fn serve(desktop: Arc<dyn Desktop>, incoming: PathBuf, mut session: HostSe
             Err(e) => return Err(e.to_string()),
         }
     }
+}
+
+/// Captures host sound and sends it as Opus packets. Packets that do not
+/// fit in the audio queue are dropped: late sound is useless.
+fn start_audio(source: okno_audio::Source, sender: Sender) -> Result<okno_audio::Capture, okno_audio::AudioError> {
+    let mut encoder = okno_audio::Encoder::new(96_000)?;
+    let mut seq = 0u64;
+    okno_audio::capture(source, move |frame| match encoder.encode(frame) {
+        Ok(data) => {
+            let _ = sender.try_send(Msg::Audio(AudioPacket { seq, data }));
+            seq += 1;
+        }
+        Err(e) => tracing::debug!("audio encode: {e}"),
+    })
 }
 
 struct Shared {

@@ -46,6 +46,7 @@ pub struct SessionView {
     _files: crate::files_ui::FilesUi,
     terminals: Rc<RefCell<Vec<Rc<TerminalView>>>>,
     _forwards: Rc<RefCell<Vec<Forward>>>,
+    _sound: Rc<RefCell<Option<okno_audio::Playback>>>,
 }
 
 impl SessionView {
@@ -116,6 +117,26 @@ impl SessionView {
             _ => {}
         }));
         remote.request_video(primary as u32, MAX_FPS, 0);
+        // Sound: on by default; OKNO_NO_SOUND=1 disables it (tests).
+        let sound: Rc<RefCell<Option<okno_audio::Playback>>> = Rc::default();
+        let start_sound = {
+            let sound = sound.clone();
+            move |remote: &Remote| -> bool {
+                let ring = Arc::new(okno_audio::SampleRing::default());
+                match okno_audio::play(ring.clone()).and_then(|p| remote.start_audio(ring).map(|_| p)) {
+                    Ok(playback) => {
+                        *sound.borrow_mut() = Some(playback);
+                        true
+                    }
+                    Err(e) => {
+                        tracing::warn!("sound unavailable: {e}");
+                        false
+                    }
+                }
+            }
+        };
+        let sound_on = std::env::var_os("OKNO_NO_SOUND").is_none() && start_sound(&remote);
+        window.set_sound_on(sound_on);
         let files = crate::files_ui::install(&window, remote.files(), tokio::runtime::Handle::current(), &session_name);
         let terminals: Rc<RefCell<Vec<Rc<TerminalView>>>> = Rc::default();
         let forwards: Rc<RefCell<Vec<Forward>>> = Rc::default();
@@ -125,6 +146,7 @@ impl SessionView {
 
         // Session end: reported from a worker thread, handled here.
         let finish = {
+            let sound = sound.clone();
             let terminals = terminals.clone();
             let forwards = forwards.clone();
             let weak = weak.clone();
@@ -140,6 +162,7 @@ impl SessionView {
                     t.close();
                 }
                 forwards.borrow_mut().clear();
+                sound.borrow_mut().take();
                 if let Some(w) = weak.upgrade() {
                     let _ = w.hide();
                 }
@@ -328,6 +351,23 @@ impl SessionView {
         }
 
         window.show()?;
+        {
+            let remote = remote.clone();
+            let weak = window.as_weak();
+            let sound = sound.clone();
+            window.on_sound_toggled(move || {
+                let Some(w) = weak.upgrade() else { return };
+                let guard = remote.borrow();
+                let Some(r) = guard.as_ref() else { return };
+                if sound.borrow().is_some() {
+                    r.stop_audio();
+                    sound.borrow_mut().take();
+                    w.set_sound_on(false);
+                } else {
+                    w.set_sound_on(start_sound(r));
+                }
+            });
+        }
         // Terminal.
         {
             let (term_client, _) = &tools;
@@ -418,6 +458,7 @@ impl SessionView {
             _files: files,
             terminals,
             _forwards: forwards,
+            _sound: sound,
         }))
     }
 

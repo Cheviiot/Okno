@@ -489,3 +489,9 @@ msgstr "Укажите адрес в виде хост:порт"
 
 msgid "Cannot listen: {}"
 msgstr "Не удалось открыть порт: {}"
+
+msgid "Mute Sound"
+msgstr "Выключить звук"
+
+msgid "Play Sound"
+msgstr "Включить звук"

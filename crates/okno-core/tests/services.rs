@@ -22,7 +22,7 @@ async fn session() -> (Host, Remote) {
         discoverable: false,
         services: vec![],
     };
-    let handler = DesktopHandler::new(Arc::new(TestDesktop::new(64, 64, 5)));
+    let handler = DesktopHandler::new(Arc::new(TestDesktop::new(64, 64, 5))).with_audio(okno_audio::Source::Tone);
     let host = Host::start(Identity::generate(), settings, Arc::new(handler)).await.unwrap();
     let endpoint = Endpoint::from(host.local_addrs()[0]);
     let mut pending = client::open(&endpoint, &Identity::generate(), &TrustStore::default(), "c").await.unwrap();
@@ -103,4 +103,19 @@ async fn port_forwarding_carries_data_both_ways() {
     let n =
         tokio::time::timeout(Duration::from_secs(15), conn.read(&mut buf)).await.expect("closed in time").unwrap_or(0);
     assert_eq!(n, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sound_arrives_as_a_tone() {
+    let (_host, remote) = session().await;
+    let ring = Arc::new(okno_audio::SampleRing::new(0, 2000));
+    remote.start_audio(ring.clone()).unwrap();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let mut samples = vec![0f32; okno_audio::FRAME_SAMPLES * 10];
+    assert!(ring.buffered() >= samples.len(), "only {} samples", ring.buffered());
+    ring.pull(&mut samples);
+    let power = samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32;
+    // A 0.3 sine has mean power 0.045.
+    assert!((0.02..0.07).contains(&power), "power {power}");
+    remote.stop_audio();
 }

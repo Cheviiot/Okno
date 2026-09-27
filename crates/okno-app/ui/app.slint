@@ -556,6 +556,8 @@ component SessionBar inherits KHeaderBar {
     in-out property <int> display;
     in property <bool> fullscreen;
     callback open-tools;
+    in property <bool> sound;
+    callback toggle-sound;
     callback display-selected(int);
     callback toggle-fullscreen;
     callback disconnect;
@@ -567,6 +569,11 @@ component SessionBar inherits KHeaderBar {
         model: root.displays;
         current-index <=> root.display;
         selected => { root.display-selected(self.current-index); }
+    }
+    KIconButton {
+        icon: root.sound ? Icons.speaker : Icons.speaker-muted;
+        tooltip: root.sound ? @tr("Mute Sound") : @tr("Play Sound");
+        clicked => { root.toggle-sound(); }
     }
     KIconButton {
         icon: Icons.more;
@@ -680,6 +687,8 @@ export component SessionWindow inherits KAppWindow {
     callback files-activate(int);
     callback files-open-transfer(int);
 
+    in property <bool> sound-on;
+    callback sound-toggled;
     in-out property <bool> tools-open;
     in-out property <bool> ports-open;
     in property <[ForwardRow]> forwards;
@@ -718,6 +727,8 @@ export component SessionWindow inherits KAppWindow {
         display <=> root.display;
         fullscreen: false;
         open-tools => { root.tools-open = !root.tools-open; }
+        sound: root.sound-on;
+        toggle-sound => { root.sound-toggled(); }
         display-selected(i) => { root.display-selected(i); }
         toggle-fullscreen => { root.toggle-fullscreen(); }
         disconnect => { root.disconnect(); }
@@ -791,6 +802,8 @@ export component SessionWindow inherits KAppWindow {
         display <=> root.display;
         fullscreen: true;
         open-tools => { root.tools-open = !root.tools-open; }
+        sound: root.sound-on;
+        toggle-sound => { root.sound-toggled(); }
         drop-shadow-blur: 12px;
         drop-shadow-color: #00000060;
         display-selected(i) => { root.display-selected(i); }

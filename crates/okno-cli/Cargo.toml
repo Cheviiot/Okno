@@ -17,6 +17,7 @@ okno-auth.workspace = true
 okno-discovery.workspace = true
 okno-core.workspace = true
 okno-desktop.workspace = true
+okno-audio.workspace = true
 png.workspace = true
 rpassword = "7"
 tokio = { workspace = true, features = ["signal"] }

@@ -60,6 +60,7 @@ GNOME показывает диалог, токен восстановления
 | `okno-discovery` | mDNS, UDP-broadcast, Wake-on-LAN |
 | `okno-codec` | H.264 (OpenH264 из исходников): кодер и декодер |
 | `okno-desktop` | Захват экрана и ввод: порталы + PipeWire (Linux), WGC + SendInput (Windows), тестовый рабочий стол |
+| `okno-audio` | Звук: захват (PipeWire, WASAPI loopback), Opus, джиттер-буфер, воспроизведение |
 | `okno-core` | Конфиг, ключ устройства, хост, клиентская сессия, служба рабочего стола |
 | `okno-app` | Приложение на Slint (`okno`) |
 | `okno-cli` | Командная строка |

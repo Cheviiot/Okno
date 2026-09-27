@@ -7,7 +7,7 @@ use std::sync::mpsc as std_mpsc;
 use okno_codec::VideoDecoder;
 use okno_net::{Receiver, Sender};
 use okno_proto::envelope::Msg;
-use okno_proto::{Close, InputEvent, KeyframeRequest, VideoFrame, VideoStart, VideoStop};
+use okno_proto::{AudioControl, AudioPacket, Close, InputEvent, KeyframeRequest, VideoFrame, VideoStart, VideoStop};
 use tokio::task::JoinHandle;
 
 use crate::client::Session;
@@ -41,6 +41,7 @@ pub type EventSink = Arc<dyn Fn(RemoteEvent) + Send + Sync>;
 /// Handle to a running session.
 pub struct Remote {
     sender: Sender,
+    audio: AudioIn,
     files: Files,
     terminals: Terminals,
     tunnels: Tunnels,
@@ -56,14 +57,32 @@ impl Session {
             tunnels: Tunnels::new(self.sender.clone()),
         };
         let Services { files, terminals, tunnels } = services.clone();
-        let reader = tokio::spawn(read_loop(self.receiver, self.sender.clone(), services, events));
-        Remote { sender: self.sender, files, terminals, tunnels, reader }
+        let audio = AudioIn::default();
+        let reader = tokio::spawn(read_loop(self.receiver, self.sender.clone(), services, audio.clone(), events));
+        Remote { sender: self.sender, audio, files, terminals, tunnels, reader }
     }
 }
 
 impl Remote {
     pub fn sender(&self) -> &Sender {
         &self.sender
+    }
+
+    /// Starts host sound; decoded samples go to `ring` (play it with
+    /// [`okno_audio::play`]).
+    pub fn start_audio(&self, ring: Arc<okno_audio::SampleRing>) -> Result<(), okno_audio::AudioError> {
+        *self.audio.0.lock().unwrap() = Some(AudioState { decoder: okno_audio::Decoder::new()?, ring, next: None });
+        let _ = self.sender.try_send(Msg::AudioControl(AudioControl {
+            enabled: true,
+            sample_rate: okno_audio::RATE,
+            channels: 2,
+        }));
+        Ok(())
+    }
+
+    pub fn stop_audio(&self) {
+        self.audio.0.lock().unwrap().take();
+        let _ = self.sender.try_send(Msg::AudioControl(AudioControl { enabled: false, ..Default::default() }));
     }
 
     /// File transfer with the host.
@@ -112,6 +131,39 @@ impl Remote {
     }
 }
 
+struct AudioState {
+    decoder: okno_audio::Decoder,
+    ring: Arc<okno_audio::SampleRing>,
+    next: Option<u64>,
+}
+
+/// Decodes incoming sound while enabled.
+#[derive(Clone, Default)]
+struct AudioIn(Arc<std::sync::Mutex<Option<AudioState>>>);
+
+impl AudioIn {
+    fn packet(&self, packet: AudioPacket) {
+        let mut guard = self.0.lock().unwrap();
+        let Some(state) = guard.as_mut() else { return };
+        // Conceal a few lost packets; after a long gap just resume.
+        if let Some(expected) = state.next {
+            let lost = packet.seq.saturating_sub(expected);
+            if (1..=5).contains(&lost) {
+                for _ in 0..lost {
+                    if let Ok(samples) = state.decoder.conceal() {
+                        state.ring.push(samples);
+                    }
+                }
+            }
+        }
+        state.next = Some(packet.seq + 1);
+        match state.decoder.decode(&packet.data) {
+            Ok(samples) => state.ring.push(samples),
+            Err(e) => tracing::debug!("audio decode: {e}"),
+        }
+    }
+}
+
 /// Per-request routers of the services layered on the session.
 #[derive(Clone)]
 struct Services {
@@ -120,7 +172,7 @@ struct Services {
     tunnels: Tunnels,
 }
 
-async fn read_loop(mut receiver: Receiver, sender: Sender, services: Services, events: EventSink) {
+async fn read_loop(mut receiver: Receiver, sender: Sender, services: Services, audio: AudioIn, events: EventSink) {
     let (packets, queue) = std_mpsc::sync_channel::<VideoFrame>(DECODE_QUEUE);
     let decoder_events = events.clone();
     let decoder_sender = sender.clone();
@@ -143,6 +195,7 @@ async fn read_loop(mut receiver: Receiver, sender: Sender, services: Services, e
                 }
             }
             Ok(Msg::Clipboard(c)) => events(RemoteEvent::Clipboard(c.text)),
+            Ok(Msg::Audio(packet)) => audio.packet(packet),
             Ok(Msg::File(reply)) => services.files.dispatch(reply),
             Ok(Msg::Terminal(reply)) => services.terminals.dispatch(reply),
             Ok(Msg::Tunnel(reply)) => services.tunnels.dispatch(reply),

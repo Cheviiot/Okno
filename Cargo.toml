@@ -17,6 +17,7 @@ okno-discovery = { path = "crates/okno-discovery" }
 okno-core = { path = "crates/okno-core" }
 okno-codec = { path = "crates/okno-codec" }
 okno-desktop = { path = "crates/okno-desktop" }
+okno-audio = { path = "crates/okno-audio" }
 
 anyhow = "1"
 thiserror = "2"

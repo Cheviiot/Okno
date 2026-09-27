@@ -193,7 +193,12 @@ async fn run_host(store: &Store, port: Option<u16>, test_pattern: bool) -> Resul
     }
     let identity = store.identity()?;
     println!("fingerprint: {}", identity.fingerprint().display_short());
-    let host = Host::start(identity, settings, Arc::new(DesktopHandler::new(desktop))).await?;
+    let mut handler = DesktopHandler::new(desktop);
+    if test_pattern {
+        // Never capture the machine's real sound in a test setup.
+        handler = handler.with_audio(okno_audio::Source::Tone);
+    }
+    let host = Host::start(identity, settings, Arc::new(handler)).await?;
     let mut events = host.subscribe();
     for addr in host.local_addrs() {
         println!("listening on {addr}");

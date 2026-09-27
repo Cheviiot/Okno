@@ -13,6 +13,7 @@ okno-auth.workspace = true
 okno-discovery.workspace = true
 okno-codec.workspace = true
 okno-desktop.workspace = true
+okno-audio.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 socket2.workspace = true
 serde.workspace = true

@@ -17,6 +17,7 @@ okno-auth.workspace = true
 okno-discovery.workspace = true
 okno-desktop.workspace = true
 okno-core.workspace = true
+okno-audio.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
