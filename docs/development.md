@@ -101,3 +101,19 @@ distrobox enter okno-dev -- scripts/ui-screenshot.sh /tmp/shot.png 1 fluent ru d
 
 `zbus` должен работать без tokio (`ashpd` с `async-io`): поток AccessKit
 интерфейса вызывает zbus вне tokio-runtime и падает, если у zbus включён tokio.
+
+## Упаковка
+
+- `data/` — `.desktop`, AppStream metainfo, значки (цветной, symbolic, `okno.ico`
+  для Windows). Проверка: `desktop-file-validate`, `appstreamcli validate`.
+- `scripts/install.sh --prefix /usr --destdir DIR` раскладывает сборку по
+  стандартным путям; им пользуются архив Linux, Flatpak и рецепт Stapler.
+- `.github/workflows/release.yml` по тегу `v*` собирает архив Linux (Ubuntu
+  22.04, чтобы glibc подходил к ALT p11) и zip для Windows (набор Fluent).
+- Flatpak: `flatpak-builder --user --install --force-clean build-flatpak
+  packaging/flatpak/io.github.cheviiot.okno.yml` (рантайм GNOME 48, сеть на время
+  сборки cargo; для Flathub нужны вендоренные исходники).
+- `packaging/stapler/Staplerfile` — черновик рецепта Nivora; после первого
+  выпуска заполнить контрольную сумму и перенести в `Packages/Nivora/okno`.
+- Windows: `build.rs` вшивает значок и сведения о версии, у `okno.exe` нет
+  консольного окна.

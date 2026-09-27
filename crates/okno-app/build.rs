@@ -22,4 +22,15 @@ fn main() {
         .with_bundled_translations(manifest.join("po"))
         .with_default_translation_context(slint_build::DefaultTranslationContext::None);
     slint_build::compile_with_config("ui/app.slint", config).expect("Slint UI compiles");
+
+    // Icon and version info in okno.exe.
+    if target_os == "windows" {
+        let icon = manifest.join("../../data/icons/okno.ico");
+        println!("cargo:rerun-if-changed={}", icon.display());
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon(icon.to_str().expect("UTF-8 path"));
+        res.set("ProductName", "Okno");
+        res.set("FileDescription", "Okno — remote desktop for the local network");
+        res.compile().expect("Windows resources compile");
+    }
 }

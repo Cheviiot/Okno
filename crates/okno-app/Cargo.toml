@@ -39,3 +39,4 @@ rfd = { version = "0.15", default-features = false }
 
 [build-dependencies]
 slint-build = "1.18"
+winresource = "0.1"

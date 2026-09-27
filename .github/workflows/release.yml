@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    # An older base keeps the glibc requirement low for ALT p11 and friends.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpipewire-0.3-dev libspa-0.2-dev libdbus-1-dev libxkbcommon-dev \
+            libfontconfig-dev libfreetype-dev clang cmake nasm pkg-config zstd
+      - name: Build
+        run: cargo build --release --locked -p okno-app -p okno-cli
+      - name: Archive
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          d=okno-$v-linux-x86_64
+          mkdir -p $d/bin $d/scripts
+          cp target/release/okno target/release/okno-cli $d/bin/
+          cp -r data $d/
+          cp scripts/install.sh $d/scripts/
+          cp COPYING README.md $d/
+          tar --zstd -cf $d.tar.zst $d
+          sha256sum $d.tar.zst > $d.tar.zst.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: okno-*-linux-x86_64.tar.zst*
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        env:
+          OKNO_UI_KIT: fluent
+        run: cargo build --release --locked -p okno-app -p okno-cli
+      - name: Archive
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          $d = "okno-$v-windows-x86_64"
+          New-Item -ItemType Directory $d | Out-Null
+          Copy-Item target/release/okno.exe, target/release/okno-cli.exe, COPYING, README.md $d
+          Compress-Archive $d "$d.zip"
+          (Get-FileHash "$d.zip" -Algorithm SHA256).Hash.ToLower() + "  $d.zip" | Out-File "$d.zip.sha256" -Encoding ascii
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: okno-*-windows-x86_64.zip*

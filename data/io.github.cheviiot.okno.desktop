@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Okno
+GenericName=Remote Desktop
+GenericName[ru]=Удалённый рабочий стол
+Comment=Control computers on your local network
+Comment[ru]=Управление компьютерами в локальной сети
+Exec=okno
+Icon=io.github.cheviiot.okno
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=remote;desktop;vnc;rdp;screen;share;control;
+Keywords[ru]=удалённый;рабочий;стол;экран;управление;доступ;
+StartupNotify=true
+StartupWMClass=io.github.cheviiot.okno
+SingleMainWindow=true

@@ -1,0 +1,62 @@
+# Draft recipe for the Nivora catalogue (Packages/Nivora/okno). It repackages
+# the Linux release archive built by .github/workflows/release.yml; fill in
+# the checksums from the first release and move it to Nivora.
+name='okno'
+version='0.1.0'
+release=1
+summary='Remote desktop for the local network'
+summary_ru='Удалённый рабочий стол для локальной сети'
+group='Networking/Remote access'
+desc='Okno shows and controls another computer’s screen over the local network without accounts or relay servers: devices find each other and connect directly with end-to-end encryption. It carries sound, clipboard, files, a remote terminal and TCP port forwarding.'
+desc_ru='Okno показывает экран другого компьютера в локальной сети и управляет им без учётных записей и серверов-посредников: устройства находят друг друга и соединяются напрямую со сквозным шифрованием. Передаёт звук, буфер обмена, файлы, даёт удалённый терминал и проброс TCP-портов.'
+homepage='https://github.com/Cheviiot/Okno'
+maintainer='Cheviiot <Cheviiot@users.noreply.github.com>'
+
+architectures=('amd64')
+compatible_with=('altlinux')
+disable_network=1
+
+license=('GPL-3.0-only')
+
+appstream_app_id='io.github.cheviiot.okno'
+appstream_name='Okno'
+
+provides=()
+replaces=('okno')
+conflicts=()
+
+auto_reqprov_method="dirty"
+auto_req=1
+auto_prov=0
+
+# Found by the linker through auto_req: glibc, libgcc, fontconfig, freetype,
+# libxkbcommon, pipewire (libpipewire-0.3), wayland. Loaded at run time and
+# therefore listed explicitly:
+# - libX11/libXcursor/libXi/libXrandr and libxkbcommon-x11: winit dlopens them
+#   for X11 sessions and the X11 clipboard fallback.
+# - mesa libEGL/libGL: the OpenGL renderer of the UI.
+# - xdg-desktop-portal: screen sharing, remote input, clipboard, settings and
+#   the file chooser all go through it.
+deps=('libX11' 'libXcursor' 'libXi' 'libXrandr' 'libxkbcommon-x11' 'libEGL' 'libGL' 'xdg-desktop-portal')
+
+sources=(
+	"https://github.com/Cheviiot/Okno/releases/download/v${version}/okno-${version}-linux-x86_64.tar.zst"
+)
+
+checksums=(
+	'sha256:TODO'
+)
+
+package() {
+	cd "${srcdir}/okno-${version}-linux-x86_64"
+	./scripts/install.sh --prefix /usr --destdir "${pkgdir}" --target-dir bin
+}
+
+files() {
+	files-find-binary
+	files-find "/usr/share/applications/io.github.cheviiot.okno.desktop"
+	files-find "/usr/share/metainfo/io.github.cheviiot.okno.metainfo.xml"
+	files-find "/usr/share/icons/hicolor/scalable/apps/io.github.cheviiot.okno.svg"
+	files-find "/usr/share/icons/hicolor/symbolic/apps/io.github.cheviiot.okno-symbolic.svg"
+	files-find "/usr/share/licenses/okno"
+}

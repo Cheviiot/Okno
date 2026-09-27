@@ -35,6 +35,19 @@ Okno — самостоятельная реализация идеи [SubnetDes
 Okno поверх WireGuard, Tailscale или OpenVPN. Адреса CGNAT (`100.64.0.0/10`,
 Tailscale) по умолчанию разрешены.
 
+## Установка
+
+Выпуски собирает `.github/workflows/release.yml`: архив для Linux x86_64 и zip
+для Windows. Из архива Linux:
+
+```sh
+tar xf okno-0.1.0-linux-x86_64.tar.zst && cd okno-0.1.0-linux-x86_64
+sudo ./scripts/install.sh --prefix /usr --target-dir bin
+```
+
+Flatpak собирается локально из `packaging/flatpak/io.github.cheviiot.okno.yml`,
+рецепт для каталога Nivora (ALT Linux) — `packaging/stapler/Staplerfile`.
+
 ## Приложение
 
 `okno` — окно с тремя разделами:

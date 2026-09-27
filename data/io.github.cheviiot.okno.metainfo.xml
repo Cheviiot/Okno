@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: CC0-1.0 -->
+<component type="desktop-application">
+  <id>io.github.cheviiot.okno</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Okno</name>
+  <summary>Control computers on your local network</summary>
+  <summary xml:lang="ru">Управление компьютерами в локальной сети</summary>
+  <developer id="io.github.cheviiot">
+    <name>Cheviiot</name>
+  </developer>
+  <description>
+    <p>Okno shows and controls another computer’s screen over your local network, without accounts or relay servers. Devices find each other automatically and connect directly.</p>
+    <p xml:lang="ru">Okno показывает экран другого компьютера в локальной сети и позволяет им управлять — без учётных записей и серверов-посредников. Устройства находят друг друга сами и соединяются напрямую.</p>
+    <ul>
+      <li>Screen, keyboard and mouse with low latency</li>
+      <li xml:lang="ru">Экран, клавиатура и мышь с малой задержкой</li>
+      <li>Sound, clipboard and file transfer</li>
+      <li xml:lang="ru">Звук, буфер обмена и передача файлов</li>
+      <li>Remote terminal and TCP port forwarding</li>
+      <li xml:lang="ru">Удалённый терминал и проброс TCP-портов</li>
+      <li>End-to-end encryption with a device fingerprint to verify</li>
+      <li xml:lang="ru">Сквозное шифрование и отпечаток устройства для проверки</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.cheviiot.okno.desktop</launchable>
+  <url type="homepage">https://github.com/Cheviiot/Okno</url>
+  <url type="bugtracker">https://github.com/Cheviiot/Okno/issues</url>
+  <content_rating type="oars-1.1"/>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">720</display_length>
+  </requires>
+  <categories>
+    <category>Network</category>
+    <category>RemoteAccess</category>
+  </categories>
+  <releases>
+    <release version="0.1.0" date="2026-09-27">
+      <description>
+        <p>First release.</p>
+        <p xml:lang="ru">Первый выпуск.</p>
+      </description>
+    </release>
+  </releases>
+</component>

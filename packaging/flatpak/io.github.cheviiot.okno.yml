@@ -1,0 +1,45 @@
+# Local Flatpak build (network allowed during the cargo build):
+#   flatpak-builder --user --install --force-clean build-flatpak \
+#       packaging/flatpak/io.github.cheviiot.okno.yml
+# For Flathub the cargo step needs vendored sources (flatpak-cargo-generator)
+# instead of --share=network.
+id: io.github.cheviiot.okno
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.llvm20
+command: okno
+finish-args:
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # Session sound: PipeWire for capture (host) and playback (client).
+  - --filesystem=xdg-run/pipewire-0
+  # Settings, screen sharing, remote input, clipboard and file choosing go
+  # through portals and need no extra permissions.
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm20/bin
+  prepend-ld-library-path: /usr/lib/sdk/llvm20/lib
+  env:
+    CARGO_HOME: /run/build/okno/cargo
+    OKNO_UI_KIT: adwaita
+modules:
+  - name: okno
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
+    build-commands:
+      - cargo build --release --locked -p okno-app -p okno-cli
+      - scripts/install.sh --prefix /app
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - target
+          - build-flatpak
+          - .flatpak-builder

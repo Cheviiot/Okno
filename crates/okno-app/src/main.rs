@@ -1,3 +1,6 @@
+// No console window on Windows.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 //! Okno desktop application.
 
 mod app;
@@ -24,6 +27,8 @@ fn main() -> anyhow::Result<()> {
 
     // The winit backend is required for raw keyboard events; SLINT_BACKEND
     // (e.g. winit-software) still picks the renderer.
+    // Wayland app id / X11 class, matching the desktop entry.
+    let _ = slint::set_xdg_app_id("io.github.cheviiot.okno");
     if std::env::var_os("SLINT_BACKEND").is_none() {
         slint::BackendSelector::new().backend_name("winit".into()).select()?;
     }
