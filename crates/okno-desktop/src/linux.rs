@@ -302,7 +302,7 @@ async fn inject(
             }
             let x = m.x.clamp(0.0, 1.0) * mon.logical.0;
             let y = m.y.clamp(0.0, 1.0) * mon.logical.1;
-            remote.notify_pointer_motion_absolute(&session, mon.node, x, y, Default::default()).await
+            remote.notify_pointer_motion_absolute(session, mon.node, x, y, Default::default()).await
         }
         Event::Button(b) => {
             let code = match MouseButton::try_from(b.button) {
@@ -313,18 +313,17 @@ async fn inject(
                 Ok(MouseButton::Forward) => button::EXTRA,
                 _ => return Ok(()),
             };
-            remote.notify_pointer_button(&session, code, key_state(b.pressed), Default::default()).await
+            remote.notify_pointer_button(session, code, key_state(b.pressed), Default::default()).await
         }
         Event::Scroll(s) => {
             let mut result = Ok(());
             if s.steps_y != 0 {
                 result =
-                    remote.notify_pointer_axis_discrete(&session, Axis::Vertical, s.steps_y, Default::default()).await;
+                    remote.notify_pointer_axis_discrete(session, Axis::Vertical, s.steps_y, Default::default()).await;
             }
             if result.is_ok() && s.steps_x != 0 {
-                result = remote
-                    .notify_pointer_axis_discrete(&session, Axis::Horizontal, s.steps_x, Default::default())
-                    .await;
+                result =
+                    remote.notify_pointer_axis_discrete(session, Axis::Horizontal, s.steps_x, Default::default()).await;
             }
             if result.is_ok() && (s.dx != 0.0 || s.dy != 0.0) {
                 result = remote
@@ -339,9 +338,7 @@ async fn inject(
             result
         }
         Event::Key(k) => {
-            remote
-                .notify_keyboard_keycode(&session, k.evdev_code as i32, key_state(k.pressed), Default::default())
-                .await
+            remote.notify_keyboard_keycode(session, k.evdev_code as i32, key_state(k.pressed), Default::default()).await
         }
     }
 }
