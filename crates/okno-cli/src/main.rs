@@ -177,7 +177,7 @@ async fn run_host(store: &Store, port: Option<u16>, test_pattern: bool) -> Resul
         approver: None,
     };
     let desktop: Arc<dyn Desktop> = if test_pattern {
-        Arc::new(TestDesktop::new(1280, 720, 30))
+        Arc::new(TestDesktop::new(1280, 720, 30).with_virtual_display())
     } else {
         println!("requesting screen sharing permission…");
         let opened = okno_desktop::open(OpenOptions { restore_token: config.host.portal_restore_token.clone() })

@@ -16,6 +16,8 @@ mod test_desktop;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(windows)]
+mod vdd;
+#[cfg(windows)]
 mod windows;
 
 use std::sync::Arc;
@@ -59,6 +61,20 @@ impl Capture {
     }
 }
 
+/// A screen that exists only for a session: while this lives the desktop
+/// shows on it (other screens may be switched off), and dropping it puts
+/// the previous screen layout back.
+pub struct VirtualDisplay {
+    pub display: DisplayInfo,
+    _restore: Box<dyn Send>,
+}
+
+impl VirtualDisplay {
+    pub fn new(display: DisplayInfo, restore_guard: impl Send + 'static) -> Self {
+        Self { display, _restore: Box::new(restore_guard) }
+    }
+}
+
 /// Largest clipboard text exchanged, in bytes.
 pub const MAX_CLIPBOARD: usize = 1024 * 1024;
 
@@ -84,6 +100,18 @@ pub trait Desktop: Send + Sync + 'static {
     /// The host clipboard, when the platform grants access.
     fn clipboard(&self) -> Option<ClipboardLink> {
         None
+    }
+
+    /// Sizes [`virtual_display`](Self::virtual_display) can create, largest
+    /// first; empty when unsupported.
+    fn virtual_modes(&self) -> Vec<(u32, u32)> {
+        Vec::new()
+    }
+
+    /// Moves the desktop to a new virtual screen of `width`×`height`.
+    fn virtual_display(&self, width: u32, height: u32) -> Result<VirtualDisplay, DesktopError> {
+        let _ = (width, height);
+        Err(DesktopError::Unsupported("virtual displays".into()))
     }
 }
 

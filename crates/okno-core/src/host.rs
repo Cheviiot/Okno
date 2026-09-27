@@ -16,7 +16,7 @@ use okno_auth::{AllowList, Credentials, LoginThrottle, ThrottleDecision};
 use okno_discovery::{Announcer, HostAnnouncement};
 use okno_net::{Fingerprint, Identity, Receiver, Sender};
 use okno_proto::envelope::Msg;
-use okno_proto::{Close, Display, ErrorMsg, Hello, HostInfo, LoginResult, LoginStatus, PROTOCOL_VERSION};
+use okno_proto::{Close, Display, ErrorMsg, Hello, HostInfo, LoginResult, LoginStatus, PROTOCOL_VERSION, VirtualMode};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, watch};
 use tokio::task::{AbortHandle, JoinHandle};
@@ -106,6 +106,11 @@ pub type BoxFuture = Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
 pub trait SessionHandler: Send + Sync + 'static {
     /// Displays announced in `HostInfo`.
     fn displays(&self) -> Vec<Display> {
+        Vec::new()
+    }
+
+    /// Virtual screen sizes announced in `HostInfo`.
+    fn virtual_modes(&self) -> Vec<VirtualMode> {
         Vec::new()
     }
 
@@ -462,6 +467,7 @@ async fn serve(
         displays: shared.handler.displays(),
         mac_addresses: local_mac_addresses(),
         services: shared.settings.services.clone(),
+        virtual_modes: shared.handler.virtual_modes(),
     });
     if sender.send(host_info).await.is_err() {
         return Ok(None);

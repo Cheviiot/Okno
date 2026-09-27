@@ -4,14 +4,14 @@
 //! The process is made per-monitor DPI aware so monitor rectangles and
 //! captured frames are in physical pixels, the same space `SendInput` uses.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use okno_proto::input_event::Event;
 use okno_proto::{InputEvent, MouseButton};
 use tokio::sync::{mpsc, watch};
 use windows::Win32::Foundation::RECT;
-use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO};
+use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO, MONITORINFOEXW};
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
@@ -36,7 +36,7 @@ use windows_capture::settings::{
 use crate::keymap::{KEY_PAUSE, evdev_to_scancode};
 use crate::{
     Capture, ClipboardLink, Desktop, DesktopError, DisplayInfo, FrameSlot, MAX_CLIPBOARD, OpenedDesktop, PixelFormat,
-    RawFrame,
+    RawFrame, VirtualDisplay,
 };
 
 /// Wheel units per pixel of smooth scrolling (one notch = 120 ≈ 48 px).
@@ -46,17 +46,82 @@ struct WinMonitor {
     info: DisplayInfo,
     monitor: Monitor,
     rect: RECT,
+    /// Output name such as `\\.\DISPLAY1`.
+    device: String,
+}
+
+// `Monitor` wraps an HMONITOR handle, which is valid from any thread.
+unsafe impl Send for WinMonitor {}
+unsafe impl Sync for WinMonitor {}
+
+type Monitors = Arc<RwLock<Vec<WinMonitor>>>;
+
+fn enumerate_monitors() -> Result<Vec<WinMonitor>, DesktopError> {
+    let monitors = Monitor::enumerate()
+        .map_err(|e| DesktopError::Capture(e.to_string()))?
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, monitor)| {
+            let mut info = MONITORINFOEXW::default();
+            info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+            let ok = unsafe {
+                GetMonitorInfoW(
+                    HMONITOR(monitor.as_raw_hmonitor()),
+                    &mut info as *mut MONITORINFOEXW as *mut MONITORINFO,
+                )
+            };
+            if !ok.as_bool() {
+                return None;
+            }
+            let rect = info.monitorInfo.rcMonitor;
+            let end = info.szDevice.iter().position(|&c| c == 0).unwrap_or(info.szDevice.len());
+            Some(WinMonitor {
+                info: DisplayInfo {
+                    id: i as u32,
+                    name: monitor.name().unwrap_or_else(|_| format!("Monitor {}", i + 1)),
+                    width: (rect.right - rect.left) as u32,
+                    height: (rect.bottom - rect.top) as u32,
+                    primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
+                },
+                monitor,
+                rect,
+                device: String::from_utf16_lossy(&info.szDevice[..end]),
+            })
+        })
+        .collect::<Vec<_>>();
+    if monitors.is_empty() {
+        return Err(DesktopError::Capture("no monitors found".into()));
+    }
+    Ok(monitors)
+}
+
+fn refresh(monitors: &Monitors) {
+    match enumerate_monitors() {
+        Ok(list) => *monitors.write().unwrap() = list,
+        Err(e) => tracing::warn!("monitor list not updated: {e}"),
+    }
+}
+
+/// Restores the real screens when the session's virtual screen goes.
+struct EndVirtual {
+    active: Option<crate::vdd::Active>,
+    monitors: Monitors,
+}
+
+impl Drop for EndVirtual {
+    fn drop(&mut self) {
+        drop(self.active.take());
+        refresh(&self.monitors);
+    }
 }
 
 pub struct WinDesktop {
-    monitors: Vec<WinMonitor>,
+    /// Changes when a virtual screen comes or goes.
+    monitors: Monitors,
     /// Serialises `SendInput` so events from one session stay in order.
     input: Mutex<()>,
     clipboard: Option<ClipboardLink>,
 }
-
-// `Monitor` wraps an HMONITOR handle, which is valid from any thread.
-unsafe impl Sync for WinDesktop {}
 
 impl WinDesktop {
     pub fn open() -> Result<OpenedDesktop, DesktopError> {
@@ -64,33 +129,9 @@ impl WinDesktop {
             // Fails harmlessly when a manifest already set the awareness.
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
-        let monitors = Monitor::enumerate()
-            .map_err(|e| DesktopError::Capture(e.to_string()))?
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, monitor)| {
-                let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-                let ok = unsafe { GetMonitorInfoW(HMONITOR(monitor.as_raw_hmonitor()), &mut info) };
-                if !ok.as_bool() {
-                    return None;
-                }
-                let rect = info.rcMonitor;
-                Some(WinMonitor {
-                    info: DisplayInfo {
-                        id: i as u32,
-                        name: monitor.name().unwrap_or_else(|_| format!("Monitor {}", i + 1)),
-                        width: (rect.right - rect.left) as u32,
-                        height: (rect.bottom - rect.top) as u32,
-                        primary: info.dwFlags & MONITORINFOF_PRIMARY != 0,
-                    },
-                    monitor,
-                    rect,
-                })
-            })
-            .collect::<Vec<_>>();
-        if monitors.is_empty() {
-            return Err(DesktopError::Capture("no monitors found".into()));
-        }
+        // A session that crashed may have left the real screens off.
+        crate::vdd::recover();
+        let monitors = Arc::new(RwLock::new(enumerate_monitors()?));
         let desktop = Self { monitors, input: Mutex::new(()), clipboard: clipboard_link() };
         Ok(OpenedDesktop { desktop: Arc::new(desktop), restore_token: None })
     }
@@ -122,11 +163,40 @@ fn keyboard(vk: VIRTUAL_KEY, scan: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {
 
 impl Desktop for WinDesktop {
     fn displays(&self) -> Vec<DisplayInfo> {
-        self.monitors.iter().map(|m| m.info.clone()).collect()
+        self.monitors.read().unwrap().iter().map(|m| m.info.clone()).collect()
+    }
+
+    fn virtual_modes(&self) -> Vec<(u32, u32)> {
+        crate::vdd::find().map(|output| crate::vdd::modes(&output)).unwrap_or_default()
+    }
+
+    fn virtual_display(&self, width: u32, height: u32) -> Result<VirtualDisplay, DesktopError> {
+        let output = crate::vdd::find()
+            .ok_or_else(|| DesktopError::Unsupported("the Virtual Display Driver is not installed".into()))?;
+        if !crate::vdd::modes(&output).contains(&(width, height)) {
+            return Err(DesktopError::Unsupported(format!("the virtual screen has no {width}x{height} mode")));
+        }
+        let active = crate::vdd::activate(&output, width, height).map_err(DesktopError::Capture)?;
+        let end = EndVirtual { active: Some(active), monitors: self.monitors.clone() };
+        // Windows needs a moment before the new monitor is enumerable.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            refresh(&self.monitors);
+            let found = self.monitors.read().unwrap().iter().find(|m| m.device == output).map(|m| m.info.clone());
+            if let Some(info) = found {
+                return Ok(VirtualDisplay::new(info, end));
+            }
+            if std::time::Instant::now() >= deadline {
+                // Dropping `end` puts the real screens back.
+                return Err(DesktopError::Capture("the virtual screen did not appear".into()));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
     }
 
     fn capture(&self, display: u32) -> Result<Capture, DesktopError> {
-        let monitor = self.monitors.get(display as usize).ok_or(DesktopError::NoDisplay(display))?.monitor;
+        let monitor =
+            self.monitors.read().unwrap().get(display as usize).ok_or(DesktopError::NoDisplay(display))?.monitor;
         let slot = Arc::new(FrameSlot::default());
         let settings = Settings::new(
             monitor,
@@ -150,7 +220,7 @@ impl Desktop for WinDesktop {
         let Some(event) = event.event else { return };
         match event {
             Event::Motion(m) => {
-                let Some(mon) = self.monitors.get(m.display as usize) else { return };
+                let Some(r) = self.monitors.read().unwrap().get(m.display as usize).map(|mon| mon.rect) else { return };
                 let (vx, vy, vw, vh) = unsafe {
                     (
                         GetSystemMetrics(SM_XVIRTUALSCREEN),
@@ -159,7 +229,6 @@ impl Desktop for WinDesktop {
                         GetSystemMetrics(SM_CYVIRTUALSCREEN).max(2),
                     )
                 };
-                let r = mon.rect;
                 let px = r.left as f64 + m.x.clamp(0.0, 1.0) * (r.right - r.left - 1) as f64;
                 let py = r.top as f64 + m.y.clamp(0.0, 1.0) * (r.bottom - r.top - 1) as f64;
                 let nx = ((px - vx as f64) * 65535.0 / (vw - 1) as f64).round() as i32;

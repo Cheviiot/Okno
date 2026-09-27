@@ -603,3 +603,6 @@ msgstr "Не удалось отправить сигнал пробуждени
 
 msgid "Scale to Window"
 msgstr "Масштабировать по окну"
+
+msgid "Virtual Screen {}×{}"
+msgstr "Виртуальный экран {}×{}"

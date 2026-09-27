@@ -148,12 +148,22 @@ impl Remote {
     }
 
     pub async fn start_video(&self, display: u32, max_fps: u32, bitrate_kbps: u32) -> Result<(), okno_net::Error> {
-        self.sender.send(Msg::VideoStart(VideoStart { display, max_fps, bitrate_kbps })).await
+        self.sender.send(Msg::VideoStart(VideoStart { display, max_fps, bitrate_kbps, virtual_mode: None })).await
     }
 
     /// Like [`start_video`](Self::start_video) without waiting; for UI code.
     pub fn request_video(&self, display: u32, max_fps: u32, bitrate_kbps: u32) {
-        let _ = self.sender.try_send(Msg::VideoStart(VideoStart { display, max_fps, bitrate_kbps }));
+        let start = VideoStart { display, max_fps, bitrate_kbps, virtual_mode: None };
+        let _ = self.sender.try_send(Msg::VideoStart(start));
+    }
+
+    /// Asks the host to move its desktop to a virtual screen of this size
+    /// (one of `HostInfo.virtual_modes`) and stream it. Asking for a real
+    /// display again puts the host's screens back.
+    pub fn request_virtual_video(&self, width: u32, height: u32, max_fps: u32, bitrate_kbps: u32) {
+        let virtual_mode = Some(okno_proto::VirtualMode { width, height });
+        let start = VideoStart { display: 0, max_fps, bitrate_kbps, virtual_mode };
+        let _ = self.sender.try_send(Msg::VideoStart(start));
     }
 
     pub async fn stop_video(&self) -> Result<(), okno_net::Error> {

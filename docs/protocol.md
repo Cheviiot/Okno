@@ -59,7 +59,7 @@ plaintext = channel u8 || flags u8 || fragment  (flags bit0 = FIN)
 4. Если на хосте включено «Спрашивать перед каждым подключением», после верного
    пароля хост показывает своему пользователю запрос (до 60 с). Отказ или
    молчание — `LoginResult{Denied}`; клиент ждёт ответа на `Login` до 90 с.
-5. После успеха хост шлёт `HostInfo{displays, mac_addresses, services}`.
+5. После успеха хост шлёт `HostInfo{displays, mac_addresses, services, virtual_modes}`.
 6. Дальше — сообщения служб; `Ping`/`Pong` для проверки задержки, `Close` для
    завершения.
 
@@ -73,6 +73,13 @@ plaintext = channel u8 || flags u8 || fragment  (flags bit0 = FIN)
 
 - `HostInfo.displays` перечисляет мониторы хоста; клиент шлёт
   `VideoStart{display, max_fps, bitrate_kbps}` (0 — значения хоста: 30 fps, 8 Мбит/с).
+- `HostInfo.virtual_modes` — размеры виртуального экрана, который хост может
+  создать (Windows с Virtual Display Driver). `VideoStart{virtual_mode}` с одним
+  из них переносит рабочий стол хоста на виртуальный экран этого размера (прочие
+  экраны на это время отключаются) и передаёт его; `display` тогда не важен, а
+  `PointerMotion.display` хост заменяет на виртуальный экран. `VideoStart` без
+  `virtual_mode` или конец сессии возвращают прежнюю раскладку. Размер не из
+  списка — `Error`.
 - `VideoFrame` — один access unit H.264 Annex B (constrained baseline, без
   B-кадров), размеры чётные. Если очередь видео отправителя переполнена, кадр
   отбрасывается и следующий кодируется как ключевой; получатель при ошибке

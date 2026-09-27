@@ -51,6 +51,14 @@ pub struct SessionView {
     _stats_timer: slint::Timer,
 }
 
+/// Asks for a real display, or for the host's desktop on a virtual screen.
+fn request(remote: &Remote, display: u32, virtual_size: Option<(u32, u32)>, (fps, kbps): (u32, u32)) {
+    match virtual_size {
+        Some((width, height)) => remote.request_virtual_video(width, height, fps, kbps),
+        None => remote.request_video(display, fps, kbps),
+    }
+}
+
 /// How the remote screen fits the window, and where to remember a change.
 pub struct Scaling {
     pub scale_to_window: bool,
@@ -85,6 +93,14 @@ impl SessionView {
                 messages.invoke_display_name(i as i32 + 1, d.name.as_str().into(), d.width as i32, d.height as i32)
             })
             .collect();
+        // Virtual screens the host can switch to follow the real displays.
+        let virtual_modes: Vec<(u32, u32)> =
+            session.host_info.virtual_modes.iter().map(|m| (m.width, m.height)).collect();
+        let displays: Vec<SharedString> = displays
+            .into_iter()
+            .chain(virtual_modes.iter().map(|&(w, h)| messages.invoke_virtual_display_name(w as i32, h as i32)))
+            .collect();
+        let real_displays = session.host_info.displays.len();
         window.set_displays(ModelRc::new(VecModel::from(displays)));
         let primary = session.host_info.displays.iter().position(|d| d.primary).unwrap_or(0);
         window.set_display(primary as i32);
@@ -160,6 +176,8 @@ impl SessionView {
         let tools = (remote.terminals(), remote.tunnels());
         let remote = Rc::new(RefCell::new(Some(remote)));
         let display = Rc::new(Cell::new(primary as u32));
+        // Set while the host shows its desktop on a virtual screen.
+        let virtual_size: Rc<Cell<Option<(u32, u32)>>> = Rc::default();
 
         // Session end: reported from a worker thread, handled here.
         let finish = {
@@ -240,28 +258,35 @@ impl SessionView {
         {
             let remote = remote.clone();
             let display = display.clone();
+            let virtual_size = virtual_size.clone();
             let quality = quality.clone();
             window.on_quality_selected(move |i| {
                 quality.set((i as usize).min(PRESETS.len() - 1));
                 if let Some(r) = remote.borrow().as_ref() {
-                    let (fps, kbps) = PRESETS[quality.get()];
-                    r.request_video(display.get(), fps, kbps);
+                    request(r, display.get(), virtual_size.get(), PRESETS[quality.get()]);
                 }
             });
         }
         {
             let remote = remote.clone();
             let display = display.clone();
+            let virtual_size = virtual_size.clone();
             let quality = quality.clone();
             let weak = weak.clone();
             window.on_display_selected(move |i| {
-                display.set(i as u32);
+                let i = i.max(0) as usize;
+                match virtual_modes.get(i.wrapping_sub(real_displays)) {
+                    Some(&size) if i >= real_displays => virtual_size.set(Some(size)),
+                    _ => {
+                        display.set(i as u32);
+                        virtual_size.set(None);
+                    }
+                }
                 if let Some(w) = weak.upgrade() {
                     w.set_has_frame(false);
                 }
                 if let Some(r) = remote.borrow().as_ref() {
-                    let (fps, kbps) = PRESETS[quality.get()];
-                    r.request_video(i as u32, fps, kbps);
+                    request(r, display.get(), virtual_size.get(), PRESETS[quality.get()]);
                 }
             });
         }

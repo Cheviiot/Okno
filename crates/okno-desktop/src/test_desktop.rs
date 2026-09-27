@@ -7,7 +7,7 @@ use okno_proto::InputEvent;
 
 use tokio::sync::{mpsc, watch};
 
-use crate::{Capture, ClipboardLink, Desktop, DesktopError, DisplayInfo, FrameSlot};
+use crate::{Capture, ClipboardLink, Desktop, DesktopError, DisplayInfo, FrameSlot, VirtualDisplay};
 
 /// Input events received by a [`TestDesktop`].
 pub type TestInputLog = Arc<Mutex<Vec<InputEvent>>>;
@@ -22,6 +22,21 @@ pub struct TestDesktop {
     copied: watch::Sender<Option<Arc<str>>>,
     pasted: Arc<Mutex<Vec<String>>>,
     paste: mpsc::UnboundedSender<String>,
+    /// Size of the virtual screen, when one is active.
+    virtual_screen: Arc<Mutex<Option<(u32, u32)>>>,
+    virtual_supported: bool,
+}
+
+/// Id of the test desktop's virtual screen.
+const VIRTUAL_ID: u32 = 1;
+
+/// Clears the virtual screen when the session drops it.
+struct EndVirtual(Arc<Mutex<Option<(u32, u32)>>>);
+
+impl Drop for EndVirtual {
+    fn drop(&mut self) {
+        *self.0.lock().unwrap() = None;
+    }
 }
 
 impl TestDesktop {
@@ -36,7 +51,24 @@ impl TestDesktop {
                 log.lock().unwrap().push(text);
             }
         });
-        Self { width, height, fps: fps.max(1), inputs: TestInputLog::default(), copied, pasted, paste }
+        Self {
+            width,
+            height,
+            fps: fps.max(1),
+            inputs: TestInputLog::default(),
+            copied,
+            pasted,
+            paste,
+            virtual_screen: Arc::default(),
+            virtual_supported: false,
+        }
+    }
+
+    /// Offers virtual screens (1920×1080 and 2560×1440) that replace the
+    /// test pattern display while in use.
+    pub fn with_virtual_display(mut self) -> Self {
+        self.virtual_supported = true;
+        self
     }
 
     pub fn inputs(&self) -> TestInputLog {
@@ -70,16 +102,34 @@ impl Drop for StopOnDrop {
 
 impl Desktop for TestDesktop {
     fn displays(&self) -> Vec<DisplayInfo> {
+        if let Some((width, height)) = *self.virtual_screen.lock().unwrap() {
+            return vec![DisplayInfo { id: VIRTUAL_ID, name: "Virtual".into(), width, height, primary: true }];
+        }
         vec![DisplayInfo { id: 0, name: "Test pattern".into(), width: self.width, height: self.height, primary: true }]
     }
 
-    fn capture(&self, display: u32) -> Result<Capture, DesktopError> {
-        if display != 0 {
-            return Err(DesktopError::NoDisplay(display));
+    fn virtual_modes(&self) -> Vec<(u32, u32)> {
+        if self.virtual_supported { vec![(2560, 1440), (1920, 1080)] } else { Vec::new() }
+    }
+
+    fn virtual_display(&self, width: u32, height: u32) -> Result<VirtualDisplay, DesktopError> {
+        if !self.virtual_modes().contains(&(width, height)) {
+            return Err(DesktopError::Unsupported(format!("virtual display {width}x{height}")));
         }
+        *self.virtual_screen.lock().unwrap() = Some((width, height));
+        let display = DisplayInfo { id: VIRTUAL_ID, name: "Virtual".into(), width, height, primary: true };
+        Ok(VirtualDisplay::new(display, EndVirtual(self.virtual_screen.clone())))
+    }
+
+    fn capture(&self, display: u32) -> Result<Capture, DesktopError> {
+        let (w, h) = match (display, *self.virtual_screen.lock().unwrap()) {
+            (0, None) => (self.width, self.height),
+            (VIRTUAL_ID, Some(size)) => size,
+            _ => return Err(DesktopError::NoDisplay(display)),
+        };
         let slot = Arc::new(FrameSlot::default());
         let stop = Arc::new(AtomicBool::new(false));
-        let (w, h, fps) = (self.width, self.height, self.fps);
+        let fps = self.fps;
         let producer = slot.clone();
         let stopped = stop.clone();
         std::thread::Builder::new()

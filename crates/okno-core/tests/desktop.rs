@@ -85,3 +85,60 @@ async fn streams_video_and_injects_input() {
     assert_eq!(pasted.lock().unwrap().as_slice(), ["copied on client"]);
     remote.close().await;
 }
+
+/// The client moves the host desktop to a virtual screen and back.
+#[tokio::test(flavor = "multi_thread")]
+async fn virtual_screen_replaces_the_display_while_used() {
+    let desktop = Arc::new(TestDesktop::new(320, 240, 30).with_virtual_display());
+    let settings = HostSettings {
+        device_name: "desk".into(),
+        port: 0,
+        listen: vec![IpAddr::V4(Ipv4Addr::LOCALHOST)],
+        allowed_networks: AllowList::default(),
+        credentials: Credentials::new("admin", "hunter22").unwrap(),
+        discoverable: false,
+        services: vec!["desktop".into()],
+        approver: None,
+    };
+    let handler = Arc::new(DesktopHandler::new(desktop.clone()));
+    let host = Host::start(Identity::generate(), settings, handler).await.unwrap();
+    let endpoint = Endpoint::from(host.local_addrs()[0]);
+    let mut pending = client::open(&endpoint, &Identity::generate(), &TrustStore::default(), "c").await.unwrap();
+    pending.login("admin", "hunter22").await.unwrap();
+    let session = pending.into_session();
+    let modes: Vec<_> = session.host_info.virtual_modes.iter().map(|m| (m.width, m.height)).collect();
+    assert_eq!(modes, [(2560, 1440), (1920, 1080)]);
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let remote = session.run(Arc::new(move |e| {
+        let _ = tx.send(e);
+    }));
+    let next_size = async |rx: &mut mpsc::UnboundedReceiver<RemoteEvent>| loop {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        match tokio::time::timeout_at(deadline, rx.recv()).await.expect("frame in time").unwrap() {
+            RemoteEvent::Frame { width, height, .. } => break (width, height),
+            RemoteEvent::Error(e) => panic!("remote error: {e}"),
+            _ => {}
+        }
+    };
+
+    remote.request_virtual_video(1920, 1080, 30, 4000);
+    while next_size(&mut rx).await != (1920, 1080) {}
+    use okno_desktop::Desktop;
+    assert_eq!(desktop.displays()[0].width, 1920);
+
+    // Back to the real display: the virtual screen goes away.
+    remote.request_video(0, 30, 2000);
+    while next_size(&mut rx).await != (320, 240) {}
+    assert_eq!(desktop.displays()[0].width, 320);
+
+    // A size the host did not offer is refused.
+    remote.request_virtual_video(1234, 567, 30, 2000);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match tokio::time::timeout_at(deadline, rx.recv()).await.expect("error in time").unwrap() {
+            RemoteEvent::Error(_) => break,
+            _ => continue,
+        }
+    }
+}

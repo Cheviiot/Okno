@@ -9,7 +9,7 @@ use okno_codec::{EncoderSettings, VideoEncoder};
 use okno_desktop::{Desktop, Taken};
 use okno_net::{Sender, TrySendError};
 use okno_proto::envelope::Msg;
-use okno_proto::{AudioPacket, ClipboardText, Codec, Display, VideoFrame, VideoStart};
+use okno_proto::{AudioPacket, ClipboardText, Codec, Display, VideoFrame, VideoStart, VirtualMode};
 
 use crate::files::FileService;
 use crate::host::{BoxFuture, HostSession, SessionHandler};
@@ -52,6 +52,10 @@ impl SessionHandler for DesktopHandler {
             .collect()
     }
 
+    fn virtual_modes(&self) -> Vec<VirtualMode> {
+        self.desktop.virtual_modes().into_iter().map(|(width, height)| VirtualMode { width, height }).collect()
+    }
+
     fn run(&self, session: HostSession) -> BoxFuture {
         Box::pin(serve(self.desktop.clone(), self.incoming.clone(), self.audio, session))
     }
@@ -72,6 +76,8 @@ async fn serve(
     audio_source: okno_audio::Source,
     mut session: HostSession,
 ) -> Result<(), String> {
+    // Declared before `stream`, so it is dropped after the capture on it.
+    let mut virtual_display: Option<okno_desktop::VirtualDisplay> = None;
     let mut stream: Option<Streamer> = None;
     // Kept alive while enabled; dropping it stops the capture.
     let mut _audio: Option<okno_audio::Capture> = None;
@@ -101,7 +107,15 @@ async fn serve(
             _ = session.shutdown.changed() => return Ok(()),
         };
         match msg {
-            Ok(Msg::Input(event)) => desktop.inject(event),
+            Ok(Msg::Input(mut event)) => {
+                // On a virtual screen there is only that screen.
+                if let (Some(v), Some(okno_proto::input_event::Event::Motion(m))) =
+                    (&virtual_display, event.event.as_mut())
+                {
+                    m.display = v.display.id;
+                }
+                desktop.inject(event)
+            }
             Ok(Msg::File(request)) => files.handle(request).await,
             Ok(Msg::AudioControl(control)) => {
                 _audio = None;
@@ -121,8 +135,15 @@ async fn serve(
                     }
                 }
             }
-            Ok(Msg::VideoStart(start)) => {
+            Ok(Msg::VideoStart(mut start)) => {
                 stream = None; // stop the previous one first
+                if let Err(e) = switch_virtual(&*desktop, &mut virtual_display, start.virtual_mode) {
+                    let _ = session.sender.send(Msg::Error(okno_proto::ErrorMsg { message: e })).await;
+                    continue;
+                }
+                if let Some(v) = &virtual_display {
+                    start.display = v.display.id;
+                }
                 match Streamer::start(desktop.clone(), session.sender.clone(), start) {
                     Ok(s) => stream = Some(s),
                     Err(e) => {
@@ -143,6 +164,27 @@ async fn serve(
             Err(e) => return Err(e.to_string()),
         }
     }
+}
+
+/// Creates, resizes or removes the session's virtual screen to match what
+/// the client asked for.
+fn switch_virtual(
+    desktop: &dyn Desktop,
+    current: &mut Option<okno_desktop::VirtualDisplay>,
+    wanted: Option<VirtualMode>,
+) -> Result<(), String> {
+    let wanted = wanted.filter(|m| m.width > 0 && m.height > 0).map(|m| (m.width, m.height));
+    let have = current.as_ref().map(|v| (v.display.width, v.display.height));
+    if wanted == have {
+        return Ok(());
+    }
+    // The old layout comes back before a new virtual screen is made.
+    *current = None;
+    if let Some((width, height)) = wanted {
+        tracing::info!("switching to a virtual screen of {width}x{height}");
+        *current = Some(desktop.virtual_display(width, height).map_err(|e| e.to_string())?);
+    }
+    Ok(())
 }
 
 /// Captures host sound and sends it as Opus packets. Packets that do not

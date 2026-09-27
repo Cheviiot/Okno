@@ -120,6 +120,18 @@ pub struct HostInfo {
     pub mac_addresses: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     #[prost(string, repeated, tag = "3")]
     pub services: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Sizes of a virtual screen the host can create for the session;
+    /// empty when it cannot.
+    #[prost(message, repeated, tag = "4")]
+    pub virtual_modes: ::prost::alloc::vec::Vec<VirtualMode>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ::prost::Message)]
+pub struct VirtualMode {
+    #[prost(uint32, tag = "1")]
+    pub width: u32,
+    #[prost(uint32, tag = "2")]
+    pub height: u32,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -173,6 +185,11 @@ pub struct VideoStart {
     /// Target bitrate in kbit/s; 0 lets the host choose.
     #[prost(uint32, tag = "3")]
     pub bitrate_kbps: u32,
+    /// When set, the host shows its desktop on a virtual screen of this
+    /// size (one of `HostInfo.virtual_modes`) and streams that instead of
+    /// `display`.
+    #[prost(message, optional, tag = "4")]
+    pub virtual_mode: ::core::option::Option<VirtualMode>,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

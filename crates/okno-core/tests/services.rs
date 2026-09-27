@@ -6,6 +6,7 @@ use okno_auth::{AllowList, Credentials, TrustStore};
 use okno_core::desktop::DesktopHandler;
 use okno_core::host::{Host, HostSettings};
 use okno_core::remote::Remote;
+#[cfg(unix)]
 use okno_core::terminal::TerminalEvent;
 use okno_core::{Endpoint, client};
 use okno_desktop::TestDesktop;

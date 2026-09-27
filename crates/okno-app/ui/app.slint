@@ -1306,6 +1306,7 @@ export global Messages {
     pure public function session-ended() -> string { @tr("The session has ended") }
     pure public function session-closed(r: string) -> string { @tr("The session has ended: {}", r) }
     pure public function display-name(i: int, name: string, w: int, h: int) -> string { @tr("{}: {} ({}×{})", i, name, w, h) }
+    pure public function virtual-display-name(w: int, h: int) -> string { @tr("Virtual Screen {}×{}", w, h) }
     pure public function device-subtitle(addr: string, os: string) -> string { @tr("{} · {}", addr, os) }
     pure public function forgotten() -> string { @tr("Device forgotten") }
     pure public function name-saved() -> string { @tr("Device name saved") }
