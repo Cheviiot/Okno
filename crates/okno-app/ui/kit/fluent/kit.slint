@@ -2,11 +2,12 @@
 // Must export the same components and properties as kit/adwaita/kit.slint.
 
 import { Palette, ScrollView, Spinner } from "std-widgets.slint";
-import { NavItem, HeaderAction } from "../../common.slint";
+import { NavItem, HeaderAction, Icons, WindowOps } from "../../common.slint";
 
 export global Theme {
     in-out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
     out property <string> kit: "fluent";
+    out property <bool> csd: false;
 
     out property <color> window-bg: dark ? #202020 : #f3f3f3;
     out property <color> view-bg: dark ? #272727 : #f9f9f9;
@@ -16,7 +17,8 @@ export global Theme {
     out property <color> dialog-bg: dark ? #2b2b2b : #ffffff;
     out property <color> fg: dark ? #ffffff : #1a1a1a;
     out property <color> dim-fg: dark ? #cfcfcf : #5d5d5d;
-    out property <color> accent: dark ? #60cdff : #005fb8;
+    // System accent; set from Rust.
+    in-out property <color> accent: dark ? #60cdff : #005fb8;
     out property <color> accent-fg: dark ? #000000 : #ffffff;
     out property <color> accent-text: dark ? #99ebff : #003e92;
     out property <color> destructive: dark ? #ff99a4 : #c42b1c;
@@ -37,6 +39,11 @@ export global Theme {
     out property <length> radius-card: 8px;
     out property <length> font-body: 14px;
     out property <length> font-small: 12px;
+    out property <length> font-caption: 12px;
+    out property <color> popover-bg: dialog-bg;
+    out property <color> border: stroke;
+    out property <color> row-hover: control-hover;
+    out property <color> row-active: control-active;
     out property <length> font-heading: 14px;
     out property <length> font-title: 28px;
     out property <string> font-family: "Segoe UI Variable Text";
@@ -71,6 +78,8 @@ export component KButton inherits Rectangle {
     in property <bool> primary;
     in property <bool> destructive;
     in property <bool> flat;
+    in property <bool> pill;
+    in property <bool> circular;
     in property <bool> enabled: true;
     callback clicked;
 
@@ -233,6 +242,7 @@ export component KSwitch inherits Rectangle {
 export component KGroup inherits VerticalLayout {
     in property <string> title;
     in property <string> description;
+    in property <bool> busy;
     spacing: 4px;
 
     if title != "": VerticalLayout {
@@ -316,99 +326,317 @@ export component KRow inherits Rectangle {
     }
 }
 
-// A scrolling page with a large title; actions sit right of the title.
-export component KPage inherits Rectangle {
+// Scrolling content area.
+export component KPage inherits ScrollView {
+    VerticalLayout {
+        padding-top: 8px;
+        padding-bottom: 28px;
+        padding-left: 40px;
+        padding-right: max(40px, root.width - 1000px - 40px);
+        spacing: 28px;
+        alignment: start;
+        @children
+    }
+}
+
+// TextBox inside a settings card (WinUI SettingsCard with a TextBox).
+export component KEntryRow inherits Rectangle {
     in property <string> title;
-    in property <[HeaderAction]> actions;
-    callback action(int);
+    in-out property <string> text;
+    in property <bool> password;
+    in property <bool> enabled: true;
+    in property <bool> error;
+    in property <bool> first;
+    in property <bool> last;
+    in property <bool> show-apply;
+    in property <bool> mono;
+    callback accepted;
+    callback applied;
+    callback edited;
+    forward-focus: entry;
 
-    background: Theme.view-bg;
-    border-radius: 8px;
-
-    ScrollView {
+    min-height: 64px;
+    border-radius: Theme.radius-control;
+    border-width: 1px;
+    border-color: Theme.stroke;
+    background: Theme.card-bg;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 16px;
+        KText {
+            text: root.title;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
         VerticalLayout {
-            padding-top: 28px;
-            padding-bottom: 28px;
-            padding-left: 40px;
-            padding-right: max(40px, parent.width - 1000px - 40px);
-            spacing: 28px;
-            alignment: start;
-            HorizontalLayout {
-                spacing: 8px;
-                KText {
-                    text: root.title;
-                    font-size: Theme.font-title;
-                    font-weight: 600;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                for a[i] in actions: KIconButton {
-                    y: (parent.height - self.height) / 2;
-                    icon: a.icon;
-                    tooltip: a.tooltip;
-                    clicked => { root.action(i); }
-                }
+            alignment: center;
+            entry := KEntry {
+                width: 260px;
+                text <=> root.text;
+                password: root.password;
+                enabled: root.enabled;
+                error: root.error;
+                mono: root.mono;
+                accepted => { root.accepted(); }
+                edited => { root.edited(); }
             }
-            @children
+        }
+        if root.show-apply: VerticalLayout {
+            alignment: center;
+            KButton {
+                text: @tr("Apply");
+                primary: true;
+                clicked => { root.applied(); }
+            }
         }
     }
 }
 
-export component KSidebar inherits Rectangle {
+export component KSwitchRow inherits KRow {
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+    KSwitch {
+        checked <=> root.checked;
+        enabled: root.enabled;
+        toggled(on) => { root.toggled(on); }
+    }
+}
+
+export component KButtonRow inherits Rectangle {
+    in property <string> title;
+    in property <bool> primary;
+    in property <bool> destructive;
+    in property <bool> enabled: true;
+    in property <bool> last: true;
+    callback clicked;
+    min-height: 44px;
+    HorizontalLayout {
+        alignment: end;
+        KButton {
+            text: root.title;
+            primary: root.primary;
+            destructive: root.destructive;
+            enabled: root.enabled;
+            clicked => { root.clicked(); }
+        }
+    }
+}
+
+export component KStatusPage inherits VerticalLayout {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> description;
+    in property <bool> compact;
+    alignment: center;
+    spacing: 8px;
+    padding-top: 32px;
+    padding-bottom: 32px;
+    HorizontalLayout {
+        alignment: center;
+        padding-bottom: 8px;
+        KIcon {
+            source: root.icon;
+            size: root.compact ? 48px : 96px;
+            tint: Theme.dim-fg;
+        }
+    }
+    KText {
+        text: root.title;
+        font-size: 20px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    if root.description != "": KText {
+        text: root.description;
+        color: Theme.dim-fg;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+    @children
+}
+
+// Windows keeps the native title bar.
+export component KAppWindow inherits Window {
+    background: Theme.window-bg;
+    default-font-family: Theme.font-family;
+    default-font-size: Theme.font-body;
+    @children
+}
+
+// Command bar with a title and end actions.
+export component KHeaderBar inherits Rectangle {
+    in property <string> title;
+    in property <bool> start-controls;
+    in property <bool> end-controls;
+    in property <color> bg: Theme.window-bg;
+    in property <bool> border;
+    in property <length> title-margin;
+    height: 48px;
+    background: bg;
+    HorizontalLayout {
+        padding: 8px;
+        padding-left: 16px;
+        spacing: 8px;
+        KText {
+            text: root.title;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        @children
+    }
+}
+
+component NavButton inherits Rectangle {
+    in property <string> title;
+    in property <image> icon;
+    in property <bool> selected;
+    callback clicked;
+    height: 36px;
+    border-radius: Theme.radius-control;
+    background: selected ? Theme.subtle-hover : area.pressed ? Theme.subtle-active : area.has-hover ? Theme.subtle-hover : transparent;
+    accessible-role: tab;
+    accessible-label: title;
+    accessible-item-selected: selected;
+    accessible-action-default => { clicked(); }
+    area := TouchArea { clicked => { root.clicked(); } }
+    if root.selected: Rectangle {
+        x: 0;
+        width: 3px;
+        height: 16px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 1.5px;
+        background: Theme.accent;
+    }
+    HorizontalLayout {
+        padding-left: 16px;
+        spacing: 16px;
+        KIcon { source: root.icon; }
+        KText {
+            text: root.title;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// NavigationView: pane on the left (items at the top, menu entries such as
+// Settings at the bottom) and the content with a large title.
+export component KSplitView inherits Rectangle {
     in property <[NavItem]> items;
     in-out property <int> current;
     in property <string> app-title;
+    in property <[NavItem]> menu;
+    callback menu-activated(int);
+    in property <string> content-title;
+    in property <[HeaderAction]> actions;
+    callback action(int);
 
-    width: 260px;
-    background: Theme.sidebar-bg;
-
-    VerticalLayout {
-        padding-left: 4px;
-        padding-right: 4px;
+    HorizontalLayout {
         Rectangle {
-            height: 48px;
-            KText {
-                x: 16px;
-                text: app-title;
-                font-size: Theme.font-small;
-                vertical-alignment: center;
-            }
-        }
-        VerticalLayout {
-            spacing: 4px;
-            alignment: start;
-            for item[i] in items: Rectangle {
-                height: 36px;
-                border-radius: Theme.radius-control;
-                background: i == current ? Theme.subtle-hover : area.pressed ? Theme.subtle-active : area.has-hover ? Theme.subtle-hover : transparent;
-                accessible-role: tab;
-                accessible-label: item.title;
-                accessible-item-selected: i == current;
-                accessible-action-default => { root.current = i; }
-                area := TouchArea {
-                    clicked => { root.current = i; }
-                }
-                // Selection pill.
-                if i == current: Rectangle {
-                    x: 0;
-                    width: 3px;
-                    height: 16px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: 1.5px;
-                    background: Theme.accent;
-                }
-                HorizontalLayout {
-                    padding-left: 16px;
-                    spacing: 16px;
-                    KIcon {
-                        source: item.icon;
-                    }
+            width: 260px;
+            VerticalLayout {
+                padding-left: 4px;
+                padding-right: 4px;
+                padding-bottom: 4px;
+                spacing: 4px;
+                Rectangle {
+                    height: 48px;
                     KText {
-                        text: item.title;
+                        x: 16px;
+                        text: root.app-title;
+                        font-size: Theme.font-small;
                         vertical-alignment: center;
                     }
                 }
+                for item[i] in root.items: NavButton {
+                    title: item.title;
+                    icon: item.icon;
+                    selected: i == root.current;
+                    clicked => { root.current = i; }
+                }
+                Rectangle { vertical-stretch: 1; }
+                for m[i] in root.menu: NavButton {
+                    title: m.title;
+                    icon: m.icon;
+                    clicked => { root.menu-activated(i); }
+                }
             }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            background: Theme.view-bg;
+            border-top-left-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.stroke;
+            VerticalLayout {
+                HorizontalLayout {
+                    padding-left: 40px;
+                    padding-right: 40px;
+                    padding-top: 28px;
+                    padding-bottom: 20px;
+                    spacing: 8px;
+                    KText {
+                        text: root.content-title;
+                        font-size: Theme.font-title;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    for a[i] in root.actions: KIconButton {
+                        icon: a.icon;
+                        tooltip: a.tooltip;
+                        clicked => { root.action(i); }
+                    }
+                }
+                @children
+            }
+        }
+    }
+}
+
+// ContentDialog with a close button, for settings and about.
+export component KSheet inherits Rectangle {
+    in property <string> title;
+    in property <length> sheet-width: 560px;
+    in property <length> sheet-height: 540px;
+    callback closed;
+
+    background: #0000004d;
+    TouchArea { clicked => { root.closed(); } }
+    Rectangle {
+        width: min(root.sheet-width, parent.width - 24px);
+        height: min(root.sheet-height, parent.height - 24px);
+        border-radius: Theme.radius-card;
+        background: Theme.dialog-bg;
+        border-width: 1px;
+        border-color: Theme.stroke;
+        drop-shadow-blur: 32px;
+        drop-shadow-color: #00000047;
+        drop-shadow-offset-y: 8px;
+        clip: true;
+        TouchArea { }
+        VerticalLayout {
+            HorizontalLayout {
+                padding: 8px;
+                padding-left: 24px;
+                KText {
+                    text: root.title;
+                    font-size: 20px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                KIconButton {
+                    icon: Icons.close;
+                    tooltip: @tr("Close");
+                    clicked => { root.closed(); }
+                }
+            }
+            @children
         }
     }
 }
@@ -488,8 +716,8 @@ export component KToast inherits Rectangle {
 
 export component KSpinner inherits Spinner {
     indeterminate: true;
-    width: 24px;
-    height: 24px;
+    width: 16px;
+    height: 16px;
 }
 
 export component KCaption inherits KText {

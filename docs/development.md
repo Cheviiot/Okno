@@ -73,6 +73,17 @@ GNOME показывает диалог, токен восстановления
 выбирает набор по целевой ОС; `OKNO_UI_KIT=adwaita|fluent` переопределяет выбор.
 Новый компонент нужно добавлять в оба набора сразу.
 
+Набор Adwaita следует GNOME HIG (libadwaita 1.7): окно без системной рамки
+(`KAppWindow`, клиентские декорации), `KHeaderBar` с кнопками окна по
+`org.gnome.desktop.wm.preferences button-layout`, `KSplitView` как
+AdwNavigationSplitView с главным меню (Параметры, О приложении), строки
+`KRow`/`KEntryRow`/`KSwitchRow`/`KButtonRow`, `KStatusPage`, листы `KSheet` и
+диалоги `KDialog`. Кнопки окна вызывают глобальный `WindowOps`, Rust реализует
+его через winit (`crates/okno-app/src/chrome.rs`). Тёмный стиль, акцентный цвет и
+раскладка кнопок читаются через портал Settings и меняются на лету. В наборе
+Fluent у окна остаётся системная рамка Windows, а «Параметры» и «О приложении»
+стоят внизу панели навигации.
+
 Строки интерфейса пишутся по-английски в `@tr(...)`; строки, которые собирает
 Rust-код, живут в глобальном объекте `Messages` в `app.slint`. Русский перевод —
 `crates/okno-app/po/ru/LC_MESSAGES/okno-app.po`, он вшивается при сборке.

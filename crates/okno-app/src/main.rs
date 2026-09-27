@@ -1,6 +1,7 @@
 //! Okno desktop application.
 
 mod app;
+mod chrome;
 mod host;
 mod keys;
 mod session;

@@ -252,3 +252,120 @@ msgid_plural "{n} devices connected"
 msgstr[0] "Подключено {n} устройство"
 msgstr[1] "Подключено {n} устройства"
 msgstr[2] "Подключено {n} устройств"
+
+msgid "Connect by Address"
+msgstr "Подключение по адресу"
+
+msgid "Computer Address"
+msgstr "Адрес компьютера"
+
+msgid "On This Network"
+msgstr "В этой сети"
+
+msgid "No Devices Found"
+msgstr "Устройства не найдены"
+
+msgid "Computers appear here when Okno runs on them with remote control allowed."
+msgstr "Здесь появятся компьютеры, на которых запущен Okno и разрешено удалённое управление."
+
+msgid "Trusted Devices"
+msgstr "Доверенные устройства"
+
+msgid "Allow Remote Control"
+msgstr "Разрешить удалённое управление"
+
+msgid "Visible on the Network"
+msgstr "Видимость в сети"
+
+msgid "Others find this computer without typing its address."
+msgstr "Другие найдут этот компьютер без ввода адреса."
+
+msgid "Connected Now"
+msgstr "Подключены сейчас"
+
+msgid "Not accepting connections"
+msgstr "Подключения не принимаются"
+
+msgid "People connecting to this computer log in as “{}”."
+msgstr "Подключающиеся к этому компьютеру входят как «{}»."
+
+msgid "Set a username and password before allowing remote control."
+msgstr "Задайте имя пользователя и пароль, прежде чем разрешать удалённое управление."
+
+msgid "Repeat Password"
+msgstr "Повтор пароля"
+
+msgid "Change Login"
+msgstr "Изменить данные входа"
+
+msgid "Save Login"
+msgstr "Сохранить"
+
+msgid "This Device"
+msgstr "Это устройство"
+
+msgid "Device Name"
+msgstr "Имя устройства"
+
+msgid "Device Fingerprint"
+msgstr "Отпечаток устройства"
+
+msgid "Preferences"
+msgstr "Параметры"
+
+msgid "About Okno"
+msgstr "О приложении Okno"
+
+msgid "Search Again"
+msgstr "Искать снова"
+
+msgid "Remote desktop for the local network"
+msgstr "Удалённый рабочий стол для локальной сети"
+
+msgid "This application comes with absolutely no warranty. See the GNU General Public License, version 3 only, for details."
+msgstr "Это приложение поставляется без каких-либо гарантий. Подробнее — в GNU General Public License, только версия 3."
+
+msgid "New Device"
+msgstr "Новое устройство"
+
+msgid "You are connecting to “{}” for the first time. Check that this fingerprint matches the one shown on that computer under This Computer → Identity."
+msgstr "Вы впервые подключаетесь к «{}». Убедитесь, что отпечаток совпадает с показанным на том компьютере в разделе «Этот компьютер → Удостоверение»."
+
+msgid "Device Key Changed"
+msgstr "Ключ устройства изменился"
+
+msgid "Trust New Key"
+msgstr "Доверять новому ключу"
+
+msgid "Log In to {}"
+msgstr "Вход на {}"
+
+msgid "Full Screen"
+msgstr "Во весь экран"
+
+msgid "{} does not answer. Is Okno running there with remote control allowed?"
+msgstr "{} не отвечает. Запущен ли там Okno с разрешённым удалённым управлением?"
+
+msgid "Device name saved"
+msgstr "Имя устройства сохранено"
+
+msgid "Hide Text"
+msgstr "Скрыть текст"
+
+msgid "Show Text"
+msgstr "Показать текст"
+
+msgid "Apply"
+msgstr "Применить"
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "Minimize"
+msgstr "Свернуть"
+
+msgid "Maximize"
+msgstr "Развернуть"
+
+msgid "Main Menu"
+msgstr "Главное меню"

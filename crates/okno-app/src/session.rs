@@ -14,6 +14,7 @@ use slint::winit_030::winit::event::{ElementState, WindowEvent};
 use slint::winit_030::{EventResult, WinitWindowAccessor};
 use slint::{ComponentHandle, Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 
+use crate::chrome::{self, Cursor, Look};
 use crate::{Messages, SessionWindow, keys};
 
 const MAX_FPS: u32 = 30;
@@ -46,9 +47,12 @@ impl SessionView {
     /// `on_closed` runs on the UI thread once, when the session ends.
     pub fn open(
         session: Session,
+        look: &Look,
         on_closed: impl Fn(Option<String>) + 'static,
     ) -> Result<Rc<Self>, slint::PlatformError> {
         let window = SessionWindow::new()?;
+        chrome::apply!(window, look);
+        let cursor = Cursor::default();
         let messages = window.global::<Messages>();
         window.set_session_title(SharedString::from(format!("{} — Okno", session.host.device_name)));
         window.set_status(messages.invoke_video_waiting());
@@ -200,6 +204,14 @@ impl SessionView {
         {
             let finish = finish.clone();
             let remote = remote.clone();
+            chrome::install!(window, cursor, move || {
+                close_remote(&remote);
+                finish(None);
+            });
+        }
+        {
+            let finish = finish.clone();
+            let remote = remote.clone();
             window.window().on_close_requested(move || {
                 close_remote(&remote);
                 finish(None);
@@ -213,50 +225,63 @@ impl SessionView {
         {
             let send = send.clone();
             let weak = weak.clone();
-            window.window().on_winit_window_event(move |_, event| match event {
-                WindowEvent::KeyboardInput { event, .. } => {
-                    // F11 toggles full screen locally.
-                    if event.state == ElementState::Pressed
-                        && event.physical_key
-                            == slint::winit_030::winit::keyboard::PhysicalKey::Code(
-                                slint::winit_030::winit::keyboard::KeyCode::F11,
-                            )
-                    {
-                        if !event.repeat {
-                            if let Some(w) = weak.upgrade() {
-                                w.set_fullscreen(!w.get_fullscreen());
+            let cursor = cursor.clone();
+            window.window().on_winit_window_event(move |_, event| {
+                if let Some(w) = weak.upgrade() {
+                    chrome::observe!(w, cursor, event);
+                }
+                match event {
+                    WindowEvent::KeyboardInput { event, .. } => {
+                        // F11 toggles full screen locally.
+                        if event.state == ElementState::Pressed
+                            && event.physical_key
+                                == slint::winit_030::winit::keyboard::PhysicalKey::Code(
+                                    slint::winit_030::winit::keyboard::KeyCode::F11,
+                                )
+                        {
+                            if !event.repeat {
+                                if let Some(w) = weak.upgrade() {
+                                    w.set_fullscreen(!w.get_fullscreen());
+                                }
+                            }
+                            return EventResult::PreventDefault;
+                        }
+                        // The remote system repeats held keys itself.
+                        if event.repeat {
+                            return EventResult::PreventDefault;
+                        }
+                        if let Some(code) = keys::evdev_code(event.physical_key) {
+                            let down = event.state == ElementState::Pressed;
+                            let changed = if down {
+                                pressed.borrow_mut().insert(code)
+                            } else {
+                                pressed.borrow_mut().remove(&code)
+                            };
+                            if changed || down {
+                                send(Event::Key(KeyEvent { evdev_code: code, pressed: down }));
                             }
                         }
-                        return EventResult::PreventDefault;
+                        EventResult::PreventDefault
                     }
-                    // The remote system repeats held keys itself.
-                    if event.repeat {
-                        return EventResult::PreventDefault;
-                    }
-                    if let Some(code) = keys::evdev_code(event.physical_key) {
-                        let down = event.state == ElementState::Pressed;
-                        let changed =
-                            if down { pressed.borrow_mut().insert(code) } else { pressed.borrow_mut().remove(&code) };
-                        if changed || down {
-                            send(Event::Key(KeyEvent { evdev_code: code, pressed: down }));
+                    // Keys held while focus leaves (Alt+Tab) would stay stuck on
+                    // the remote side.
+                    WindowEvent::Focused(false) => {
+                        for code in std::mem::take(&mut *pressed.borrow_mut()) {
+                            send(Event::Key(KeyEvent { evdev_code: code, pressed: false }));
                         }
+                        EventResult::Propagate
                     }
-                    EventResult::PreventDefault
+                    _ => EventResult::Propagate,
                 }
-                // Keys held while focus leaves (Alt+Tab) would stay stuck on
-                // the remote side.
-                WindowEvent::Focused(false) => {
-                    for code in std::mem::take(&mut *pressed.borrow_mut()) {
-                        send(Event::Key(KeyEvent { evdev_code: code, pressed: false }));
-                    }
-                    EventResult::Propagate
-                }
-                _ => EventResult::Propagate,
             });
         }
 
         window.show()?;
         Ok(Rc::new(Self { _window: window, remote, _poll_closed: poll_closed }))
+    }
+
+    pub fn apply_look(&self, look: &Look) {
+        chrome::apply!(self._window, look);
     }
 
     pub fn is_open(&self) -> bool {

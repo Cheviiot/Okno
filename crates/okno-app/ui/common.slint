@@ -10,6 +10,25 @@ export struct HeaderAction {
     tooltip: string,
 }
 
+export enum ResizeEdge { north, south, east, west, north-east, north-west, south-east, south-west }
+
+// Window management for client-side decorations. Globals are per window, so
+// each window wires its own handlers from Rust.
+export global WindowOps {
+    in property <bool> maximized;
+    in property <bool> active: true;
+    // Buttons left and right of the title, from GNOME's button-layout,
+    // each one of "minimize", "maximize", "close".
+    in property <[string]> start-buttons: [];
+    in property <[string]> end-buttons: ["minimize", "maximize", "close"];
+    callback drag();
+    callback toggle-maximize();
+    callback minimize();
+    callback close();
+    callback resize(ResizeEdge);
+    callback show-menu();
+}
+
 export global Icons {
     out property <image> devices: @image-url("icons/devices.svg");
     out property <image> host: @image-url("icons/host.svg");
@@ -26,4 +45,14 @@ export global Icons {
     out property <image> trash: @image-url("icons/trash.svg");
     out property <image> ok: @image-url("icons/ok.svg");
     out property <image> link: @image-url("icons/link.svg");
+    out property <image> menu: @image-url("icons/menu.svg");
+    out property <image> reveal: @image-url("icons/reveal.svg");
+    out property <image> conceal: @image-url("icons/conceal.svg");
+    out property <image> copy: @image-url("icons/copy.svg");
+    out property <image> network: @image-url("icons/network.svg");
+    out property <image> apply: @image-url("icons/apply.svg");
+    out property <image> win-minimize: @image-url("icons/win-minimize.svg");
+    out property <image> win-maximize: @image-url("icons/win-maximize.svg");
+    out property <image> win-restore: @image-url("icons/win-restore.svg");
+    out property <image> win-close: @image-url("icons/win-close.svg");
 }

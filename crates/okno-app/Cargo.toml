@@ -25,5 +25,10 @@ sys-locale = "0.3"
 if-addrs.workspace = true
 slint = { version = "1.18", features = ["unstable-winit-030"] }
 
+futures-util = "0.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "settings"] }
+
 [build-dependencies]
 slint-build = "1.18"

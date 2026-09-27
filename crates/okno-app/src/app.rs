@@ -16,6 +16,7 @@ use okno_net::Identity;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tokio::runtime::Handle;
 
+use crate::chrome::{self, Cursor, Look};
 use crate::host::HostState;
 use crate::session::SessionView;
 use crate::{DeviceRow, DialogKind, MainWindow, Messages};
@@ -38,6 +39,13 @@ pub struct App {
     toast_timer: slint::Timer,
     discovery_timer: slint::Timer,
     searching: Cell<bool>,
+    look: RefCell<Look>,
+    cursor: Cursor,
+}
+
+thread_local! {
+    /// The app, for callbacks posted to the UI thread from other threads.
+    static APP: RefCell<std::rc::Weak<App>> = RefCell::new(std::rc::Weak::new());
 }
 
 impl App {
@@ -59,6 +67,7 @@ impl App {
         }
         window.set_version(env!("CARGO_PKG_VERSION").into());
         window.set_device_name(config.device_name.as_str().into());
+        window.set_saved_device_name(config.device_name.as_str().into());
         window.set_login_user(
             if config.client.last_username.is_empty() { "okno".into() } else { config.client.last_username.clone() }
                 .into(),
@@ -82,7 +91,11 @@ impl App {
             toast_timer: slint::Timer::default(),
             discovery_timer: slint::Timer::default(),
             searching: Cell::new(false),
+            look: RefCell::default(),
+            cursor: Cursor::default(),
         });
+        APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
+        app.install_chrome();
         app.wire();
         crate::host::init(&app);
         app.show_recent();
@@ -100,6 +113,36 @@ impl App {
 
     pub fn run(&self) -> Result<(), slint::PlatformError> {
         self.window.run()
+    }
+
+    fn install_chrome(self: &Rc<Self>) {
+        chrome::install!(self.window, self.cursor, || {
+            let _ = slint::quit_event_loop();
+        });
+        let weak = self.window.as_weak();
+        let cursor = self.cursor.clone();
+        use slint::winit_030::WinitWindowAccessor as _;
+        self.window.window().on_winit_window_event(move |_, event| {
+            if let Some(w) = weak.upgrade() {
+                chrome::observe!(w, cursor, event);
+            }
+            slint::winit_030::EventResult::Propagate
+        });
+        chrome::watch_look(&self.rt, |look| {
+            APP.with(|a| {
+                if let Some(app) = a.borrow().upgrade() {
+                    app.set_look(look);
+                }
+            })
+        });
+    }
+
+    fn set_look(&self, look: Look) {
+        chrome::apply!(self.window, &look);
+        for session in self.sessions.borrow().iter() {
+            session.apply_look(&look);
+        }
+        *self.look.borrow_mut() = look;
     }
 
     fn messages(&self) -> Messages<'_> {
@@ -173,8 +216,10 @@ impl App {
             if name.is_empty() {
                 return;
             }
-            app.config.borrow_mut().device_name = name;
+            app.config.borrow_mut().device_name = name.clone();
             app.save_config();
+            app.window.set_saved_device_name(name.into());
+            app.toast(app.messages().invoke_name_saved(), false);
         });
     }
 
@@ -384,7 +429,7 @@ impl App {
 
         let session = pending.into_session();
         let weak = Rc::downgrade(self);
-        let opened = SessionView::open(session, move |reason| {
+        let opened = SessionView::open(session, &self.look.borrow(), move |reason| {
             let Some(app) = weak.upgrade() else { return };
             app.sessions.borrow_mut().retain(|s| s.is_open());
             let text = match reason {

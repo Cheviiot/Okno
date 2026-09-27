@@ -3,12 +3,13 @@
 
 import { ComboBox } from "std-widgets.slint";
 import {
-    Theme, KText, KIcon, KButton, KIconButton, KEntry, KSwitch, KGroup, KRow, KPage, KSidebar,
-    KDialog, KDialogButtons, KToast, KSpinner, KCaption,
+    Theme, KText, KIcon, KButton, KIconButton, KEntry, KSwitch, KGroup, KRow, KEntryRow, KSwitchRow,
+    KButtonRow, KStatusPage, KPage, KSplitView, KHeaderBar, KAppWindow, KSheet, KDialog, KDialogButtons,
+    KToast, KSpinner, KCaption,
 } from "@kit/kit.slint";
-import { NavItem, HeaderAction, Icons } from "common.slint";
+import { NavItem, HeaderAction, Icons, WindowOps } from "common.slint";
 
-export { Theme }
+export { Theme, WindowOps }
 
 export struct DeviceRow {
     name: string,
@@ -32,41 +33,25 @@ component DevicesPage inherits KPage {
     in property <bool> searching;
     in-out property <string> address;
     callback connect(string);
-    callback refresh;
     callback forget(string);
 
-    title: @tr("Devices");
-    actions: [{ icon: Icons.refresh, tooltip: @tr("Search again") }];
-    action(i) => { refresh(); }
-
     KGroup {
-        title: @tr("Connect by address");
+        title: @tr("Connect by Address");
         description: @tr("A name or IP address on this network, optionally with a port.");
-        KRow {
+        KEntryRow {
+            title: @tr("Computer Address");
+            text <=> root.address;
+            first: true;
             last: true;
-            KEntry {
-                horizontal-stretch: 1;
-                placeholder: @tr("e.g. 192.168.1.20 or desk.local");
-                text <=> root.address;
-                accepted => { if root.address != "" { root.connect(root.address); } }
-            }
-            KButton {
-                text: @tr("Connect");
-                primary: true;
-                enabled: root.address != "";
-                clicked => { root.connect(root.address); }
-            }
+            show-apply: root.address != "";
+            accepted => { if root.address != "" { root.connect(root.address); } }
+            applied => { root.connect(root.address); }
         }
     }
 
-    KGroup {
-        title: @tr("On this network");
-        if nearby.length == 0: KRow {
-            last: true;
-            title: searching ? @tr("Searching…") : @tr("No devices found");
-            subtitle: searching ? "" : @tr("Hosts appear here when Okno is running with incoming connections allowed.");
-            if searching: KSpinner { }
-        }
+    if nearby.length > 0: KGroup {
+        title: @tr("On This Network");
+        busy: root.searching;
         for d[i] in nearby: KRow {
             has-icon: true;
             icon: Icons.devices;
@@ -79,9 +64,15 @@ component DevicesPage inherits KPage {
             KIcon { source: Icons.go; tint: Theme.dim-fg; }
         }
     }
+    if nearby.length == 0: KStatusPage {
+        compact: true;
+        icon: Icons.network;
+        title: root.searching ? @tr("Searching…") : @tr("No Devices Found");
+        description: root.searching ? "" : @tr("Computers appear here when Okno runs on them with remote control allowed.");
+    }
 
     if recent.length > 0: KGroup {
-        title: @tr("Trusted devices");
+        title: @tr("Trusted Devices");
         description: @tr("Devices whose key you have accepted.");
         for d[i] in recent: KRow {
             has-icon: true;
@@ -119,28 +110,40 @@ component HostPage inherits KPage {
     callback disconnect(int);
     callback discoverable-changed(bool);
 
-    title: @tr("This Computer");
-
     KGroup {
-        KRow {
+        busy: root.starting;
+        KSwitchRow {
             has-icon: true;
             icon: Icons.host;
-            title: @tr("Allow remote control");
+            title: @tr("Allow Remote Control");
             subtitle: root.status;
-            if starting: KSpinner { }
-            KSwitch {
-                checked: root.running;
-                enabled: root.has-login && !root.starting;
-                toggled(on) => { root.toggle(on); }
-            }
+            checked: root.running;
+            enabled: root.has-login && !root.starting;
+            toggled(on) => { root.toggle(on); }
         }
-        KRow {
-            title: @tr("Visible on the network");
-            subtitle: @tr("Announce this computer so others find it without typing an address.");
+        KSwitchRow {
+            has-icon: true;
+            icon: Icons.network;
+            title: @tr("Visible on the Network");
+            subtitle: @tr("Others find this computer without typing its address.");
+            checked <=> root.discoverable;
             last: true;
-            KSwitch {
-                checked <=> root.discoverable;
-                toggled(on) => { root.discoverable-changed(on); }
+            toggled(on) => { root.discoverable-changed(on); }
+        }
+    }
+
+    if sessions.length > 0: KGroup {
+        title: @tr("Connected Now");
+        for s[i] in sessions: KRow {
+            has-icon: true;
+            icon: Icons.link;
+            title: s.title;
+            subtitle: s.subtitle;
+            last: i == sessions.length - 1;
+            KButton {
+                text: @tr("Disconnect");
+                destructive: true;
+                clicked => { root.disconnect(s.id); }
             }
         }
     }
@@ -155,110 +158,93 @@ component HostPage inherits KPage {
         }
         KRow {
             title: @tr("Addresses");
-            subtitle: root.addresses == "" ? @tr("Not listening") : root.addresses;
+            subtitle: root.addresses == "" ? @tr("Not accepting connections") : root.addresses;
             last: true;
         }
     }
 
-    KGroup {
-        title: @tr("Login");
-        description: root.has-login ? @tr("Current username: ") + root.login-user : @tr("Set a username and password before allowing connections.");
-        KRow {
-            title: @tr("Username");
-            KEntry { width: 220px; text <=> root.new-user; placeholder: "okno"; }
-        }
-        KRow {
-            title: @tr("Password");
-            KEntry { width: 220px; password: true; text <=> root.new-password; error: root.login-error != ""; }
-        }
-        KRow {
-            title: @tr("Repeat password");
-            subtitle: root.login-error;
-            last: true;
-            KEntry {
-                width: 220px;
+    VerticalLayout {
+        spacing: 12px;
+        KGroup {
+            title: @tr("Login");
+            description: root.has-login
+                ? @tr("People connecting to this computer log in as “{}”.", root.login-user)
+                : @tr("Set a username and password before allowing remote control.");
+            KEntryRow {
+                title: @tr("Username");
+                text <=> root.new-user;
+                first: true;
+            }
+            KEntryRow {
+                title: @tr("Password");
+                password: true;
+                text <=> root.new-password;
+                error: root.login-error != "";
+            }
+            KEntryRow {
+                title: @tr("Repeat Password");
                 password: true;
                 text <=> root.new-repeat;
                 error: root.login-error != "";
+                last: true;
                 accepted => { root.set-login(); }
             }
         }
-    }
-    HorizontalLayout {
-        alignment: end;
-        KButton {
-            text: root.has-login ? @tr("Change login") : @tr("Save login");
-            enabled: root.new-password != "";
-            clicked => { root.set-login(); }
-        }
-    }
-
-    if sessions.length > 0: KGroup {
-        title: @tr("Connected now");
-        for s[i] in sessions: KRow {
-            has-icon: true;
-            icon: Icons.link;
-            title: s.title;
-            subtitle: s.subtitle;
-            last: i == sessions.length - 1;
+        HorizontalLayout {
+            spacing: 12px;
+            if root.login-error != "": KCaption {
+                text: root.login-error;
+                color: Theme.destructive-text;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            if root.login-error == "": Rectangle { horizontal-stretch: 1; }
             KButton {
-                text: @tr("Disconnect");
-                destructive: true;
-                clicked => { root.disconnect(s.id); }
+                text: root.has-login ? @tr("Change Login") : @tr("Save Login");
+                primary: true;
+                enabled: root.new-password != "";
+                clicked => { root.set-login(); }
             }
         }
     }
 }
 
-component SettingsPage inherits KPage {
+component SettingsContent inherits KPage {
     in-out property <string> device-name;
+    in property <string> saved-name;
     in property <string> fingerprint;
-    in property <string> version;
     callback device-name-committed(string);
 
-    title: @tr("Settings");
-
     KGroup {
-        title: @tr("This device");
-        KRow {
-            title: @tr("Device name");
-            subtitle: @tr("Shown to other devices on the network.");
-            KEntry {
-                width: 220px;
-                text <=> root.device-name;
-                accepted => { root.device-name-committed(root.device-name); }
-            }
+        title: @tr("This Device");
+        KEntryRow {
+            title: @tr("Device Name");
+            text <=> root.device-name;
+            first: true;
+            show-apply: root.device-name != root.saved-name && root.device-name != "";
+            accepted => { root.device-name-committed(root.device-name); }
+            applied => { root.device-name-committed(root.device-name); }
         }
         KRow {
-            title: @tr("Device fingerprint");
+            title: @tr("Device Fingerprint");
             subtitle: root.fingerprint;
             mono-subtitle: true;
             last: true;
         }
     }
-
-    KGroup {
-        title: @tr("About");
-        KRow {
-            title: "Okno " + root.version;
-            subtitle: @tr("Remote desktop for the local network. GPL-3.0-only.");
-            last: true;
-        }
-    }
 }
 
-export component MainWindow inherits Window {
+export component MainWindow inherits KAppWindow {
     title: "Okno";
     icon: @image-url("icons/host.svg");
-    preferred-width: 960px;
-    preferred-height: 640px;
-    min-width: 640px;
+    preferred-width: 980px;
+    preferred-height: 680px;
+    min-width: 720px;
     min-height: 480px;
-    background: Theme.window-bg;
-    default-font-family: Theme.font-family;
-    default-font-size: Theme.font-body;
 
     in-out property <int> page: 0;
+    in-out property <bool> settings-open;
+    in-out property <bool> about-open;
 
     // Devices
     in property <[DeviceRow]> nearby;
@@ -303,6 +289,7 @@ export component MainWindow inherits Window {
 
     // Settings
     in-out property <string> device-name;
+    in property <string> saved-device-name;
     in property <string> version;
     callback device-name-committed(string);
 
@@ -310,55 +297,50 @@ export component MainWindow inherits Window {
     in property <string> toast;
     in property <bool> toast-error;
 
-    HorizontalLayout {
-        KSidebar {
-            app-title: "Okno";
-            items: [
-                { title: @tr("Devices"), icon: Icons.devices },
-                { title: @tr("This Computer"), icon: Icons.host },
-                { title: @tr("Settings"), icon: Icons.settings },
-            ];
-            current <=> root.page;
+    KSplitView {
+        app-title: "Okno";
+        items: [
+            { title: @tr("Devices"), icon: Icons.devices },
+            { title: @tr("This Computer"), icon: Icons.host },
+        ];
+        current <=> root.page;
+        menu: [
+            { title: @tr("Preferences"), icon: Icons.settings },
+            { title: @tr("About Okno"), icon: Icons.host },
+        ];
+        menu-activated(i) => {
+            if i == 0 { root.settings-open = true; } else { root.about-open = true; }
         }
-        if Theme.kit == "adwaita": Rectangle {
-            width: 1px;
-            background: Theme.shade;
+        content-title: root.page == 0 ? @tr("Devices") : @tr("This Computer");
+        actions: root.page == 0 ? [{ icon: Icons.refresh, tooltip: @tr("Search Again") }] : [];
+        action(i) => { root.refresh(); }
+
+        if root.page == 0: DevicesPage {
+            nearby: root.nearby;
+            recent: root.recent;
+            searching: root.searching;
+            address <=> root.address;
+            connect(e) => { root.connect(e); }
+            forget(f) => { root.forget(f); }
         }
-        Rectangle {
-            if root.page == 0: DevicesPage {
-                nearby: root.nearby;
-                recent: root.recent;
-                searching: root.searching;
-                address <=> root.address;
-                connect(e) => { root.connect(e); }
-                refresh => { root.refresh(); }
-                forget(f) => { root.forget(f); }
-            }
-            if root.page == 1: HostPage {
-                running: root.host-running;
-                starting: root.host-starting;
-                status: root.host-status;
-                fingerprint: root.host-fingerprint;
-                addresses: root.host-addresses;
-                has-login: root.host-has-login;
-                login-user: root.host-login-user;
-                login-error: root.host-login-error;
-                sessions: root.host-sessions;
-                discoverable <=> root.host-discoverable;
-                new-user <=> root.host-new-user;
-                new-password <=> root.host-new-password;
-                new-repeat <=> root.host-new-repeat;
-                toggle(on) => { root.host-toggle(on); }
-                set-login => { root.host-set-login(); }
-                disconnect(id) => { root.host-disconnect(id); }
-                discoverable-changed(on) => { root.host-discoverable-changed(on); }
-            }
-            if root.page == 2: SettingsPage {
-                device-name <=> root.device-name;
-                fingerprint: root.host-fingerprint;
-                version: root.version;
-                device-name-committed(n) => { root.device-name-committed(n); }
-            }
+        if root.page == 1: HostPage {
+            running: root.host-running;
+            starting: root.host-starting;
+            status: root.host-status;
+            fingerprint: root.host-fingerprint;
+            addresses: root.host-addresses;
+            has-login: root.host-has-login;
+            login-user: root.host-login-user;
+            login-error: root.host-login-error;
+            sessions: root.host-sessions;
+            discoverable <=> root.host-discoverable;
+            new-user <=> root.host-new-user;
+            new-password <=> root.host-new-password;
+            new-repeat <=> root.host-new-repeat;
+            toggle(on) => { root.host-toggle(on); }
+            set-login => { root.host-set-login(); }
+            disconnect(id) => { root.host-disconnect(id); }
+            discoverable-changed(on) => { root.host-discoverable-changed(on); }
         }
     }
 
@@ -369,24 +351,68 @@ export component MainWindow inherits Window {
         y: parent.height - self.height - 24px;
     }
 
+    if root.settings-open: KSheet {
+        title: @tr("Preferences");
+        sheet-width: 600px;
+        sheet-height: 420px;
+        closed => { root.settings-open = false; }
+        SettingsContent {
+            device-name <=> root.device-name;
+            saved-name: root.saved-device-name;
+            fingerprint: root.host-fingerprint;
+            device-name-committed(n) => { root.device-name-committed(n); }
+        }
+    }
+
+    if root.about-open: KSheet {
+        title: "";
+        sheet-width: 360px;
+        sheet-height: 460px;
+        closed => { root.about-open = false; }
+        KStatusPage {
+            icon: Icons.host;
+            title: "Okno";
+            description: @tr("Remote desktop for the local network");
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: ver.preferred-width + 20px;
+                    height: 26px;
+                    border-radius: 13px;
+                    background: Theme.accent.transparentize(80%);
+                    ver := KText {
+                        text: root.version;
+                        color: Theme.accent-text;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            KCaption {
+                text: @tr("This application comes with absolutely no warranty. See the GNU General Public License, version 3 only, for details.");
+                horizontal-alignment: center;
+            }
+        }
+    }
+
     if dialog == DialogKind.connecting: KDialog {
         title: @tr("Connecting…");
         body: root.dialog-host;
-        KSpinner { x: (parent.width - self.width) / 2; }
+        HorizontalLayout { alignment: center; KSpinner { width: 32px; height: 32px; } }
         KDialogButtons {
             KButton { text: @tr("Cancel"); clicked => { root.dialog-cancelled(); } }
         }
     }
 
     if dialog == DialogKind.trust-new: KDialog {
-        title: @tr("New device");
-        body: @tr("You are connecting to “{}” for the first time. Check that this fingerprint matches the one shown on that computer in This Computer → Identity.", root.dialog-host);
+        title: @tr("New Device");
+        body: @tr("You are connecting to “{}” for the first time. Check that this fingerprint matches the one shown on that computer under This Computer → Identity.", root.dialog-host);
         KText {
             text: root.dialog-fingerprint;
             font-family: Theme.mono-family;
             font-size: 16px;
             horizontal-alignment: center;
-            wrap: word-wrap;
         }
         KDialogButtons {
             KButton { text: @tr("Cancel"); clicked => { root.dialog-cancelled(); } }
@@ -395,34 +421,38 @@ export component MainWindow inherits Window {
     }
 
     if dialog == DialogKind.trust-changed: KDialog {
-        title: @tr("Device key changed");
+        title: @tr("Device Key Changed");
         warning: true;
         body: @tr("The device at this address now has a different key. This happens after reinstalling Okno — or when someone impersonates the device. Connect only if you know why it changed.");
         KCaption { text: @tr("Was: {}", root.dialog-previous); horizontal-alignment: center; font-family: Theme.mono-family; }
         KCaption { text: @tr("Now: {}", root.dialog-fingerprint); horizontal-alignment: center; font-family: Theme.mono-family; }
         KDialogButtons {
-            KButton { text: @tr("Cancel"); primary: true; clicked => { root.dialog-cancelled(); } }
-            KButton { text: @tr("Trust new key"); destructive: true; clicked => { root.trust-accepted(); } }
+            KButton { text: @tr("Cancel"); clicked => { root.dialog-cancelled(); } }
+            KButton { text: @tr("Trust New Key"); destructive: true; clicked => { root.trust-accepted(); } }
         }
     }
 
     if dialog == DialogKind.login: KDialog {
-        title: @tr("Log in to {}", root.dialog-host);
+        title: @tr("Log In to {}", root.dialog-host);
         body: @tr("Enter the login set on that computer.");
-        user := KEntry {
-            placeholder: @tr("Username");
-            text <=> root.login-user;
-            enabled: !root.login-busy;
-            accepted => { password.focus(); }
-        }
-        password := KEntry {
-            placeholder: @tr("Password");
-            password: true;
-            text <=> root.login-password;
-            enabled: !root.login-busy;
-            error: root.login-error != "";
-            accepted => { root.login-submitted(); }
-            init => { self.focus(); }
+        KGroup {
+            KEntryRow {
+                title: @tr("Username");
+                text <=> root.login-user;
+                enabled: !root.login-busy;
+                first: true;
+                accepted => { password.focus(); }
+            }
+            password := KEntryRow {
+                title: @tr("Password");
+                password: true;
+                text <=> root.login-password;
+                enabled: !root.login-busy;
+                error: root.login-error != "";
+                last: true;
+                accepted => { root.login-submitted(); }
+                init => { self.focus(); }
+            }
         }
         if root.login-error != "": KCaption {
             text: root.login-error;
@@ -441,7 +471,7 @@ export component MainWindow inherits Window {
     }
 }
 
-export component SessionWindow inherits Window {
+export component SessionWindow inherits KAppWindow {
     in property <string> session-title;
     in property <image> frame;
     in property <bool> has-frame;
@@ -459,93 +489,78 @@ export component SessionWindow inherits Window {
     title: session-title;
     preferred-width: 1280px;
     preferred-height: 800px;
-    background: #000000;
-    default-font-family: Theme.font-family;
     full-screen: fullscreen;
 
     VerticalLayout {
-        if !fullscreen: Rectangle {
-            height: 44px;
-            background: Theme.headerbar-bg;
-            HorizontalLayout {
-                padding: 6px;
-                padding-left: 12px;
-                spacing: 8px;
-                KText {
-                    text: root.title;
-                    vertical-alignment: center;
-                    font-weight: Theme.kit == "adwaita" ? 700 : 400;
-                    horizontal-stretch: 1;
-                    overflow: elide;
-                }
-                if displays.length > 1: ComboBox {
-                    model: root.displays;
-                    current-index <=> root.display;
-                    selected => { root.display-selected(self.current-index); }
-                }
-                KIconButton {
-                    icon: Icons.fullscreen;
-                    tooltip: @tr("Full screen");
-                    clicked => { root.toggle-fullscreen(); }
-                }
-                KButton {
-                    text: @tr("Disconnect");
-                    destructive: true;
-                    clicked => { root.disconnect(); }
-                }
-            }
+    if !fullscreen: KHeaderBar {
+        title: root.session-title;
+        if root.displays.length > 1: ComboBox {
+            model: root.displays;
+            current-index <=> root.display;
+            selected => { root.display-selected(self.current-index); }
         }
-        video := Rectangle {
-            property <float> iw: max(1, root.frame.width);
-            property <float> ih: max(1, root.frame.height);
-            property <float> scale: min(self.width / 1px / iw, self.height / 1px / ih);
-            property <length> dw: iw * scale * 1px;
-            property <length> dh: ih * scale * 1px;
-            property <length> ox: (self.width - dw) / 2;
-            property <length> oy: (self.height - dh) / 2;
+        KIconButton {
+            icon: Icons.fullscreen;
+            tooltip: @tr("Full Screen");
+            clicked => { root.toggle-fullscreen(); }
+        }
+        KButton {
+            text: @tr("Disconnect");
+            destructive: true;
+            clicked => { root.disconnect(); }
+        }
+    }
+    video := Rectangle {
+        background: #000000;
+        property <float> iw: max(1, root.frame.width);
+        property <float> ih: max(1, root.frame.height);
+        property <float> scale: min(self.width / 1px / iw, self.height / 1px / ih);
+        property <length> dw: iw * scale * 1px;
+        property <length> dh: ih * scale * 1px;
+        property <length> ox: (self.width - dw) / 2;
+        property <length> oy: (self.height - dh) / 2;
 
-            Image {
-                x: video.ox;
-                y: video.oy;
-                width: video.dw;
-                height: video.dh;
-                source: root.frame;
-                image-rendering: smooth;
-            }
-            if !root.has-frame: VerticalLayout {
-                alignment: center;
-                spacing: 16px;
-                KSpinner { x: (parent.width - self.width) / 2; }
-                Text {
-                    text: root.status;
-                    color: #ffffffc0;
-                    horizontal-alignment: center;
-                    font-size: 15px;
-                }
-            }
-            area := TouchArea {
-                mouse-cursor: root.has-frame ? MouseCursor.none : MouseCursor.default;
-                changed mouse-x => { root.report(); }
-                changed mouse-y => { root.report(); }
-                pointer-event(e) => {
-                    if e.kind == PointerEventKind.down || e.kind == PointerEventKind.up {
-                        root.report();
-                        root.pointer-button(
-                            e.button == PointerEventButton.left ? 1
-                            : e.button == PointerEventButton.right ? 2
-                            : e.button == PointerEventButton.middle ? 3
-                            : e.button == PointerEventButton.back ? 4
-                            : e.button == PointerEventButton.forward ? 5 : 0,
-                            e.kind == PointerEventKind.down);
-                    }
-                }
-                scroll-event(e) => {
-                    root.scrolled(e.delta-x, e.delta-y);
-                    accept
-                }
-                double-clicked => { }
+        Image {
+            x: video.ox;
+            y: video.oy;
+            width: video.dw;
+            height: video.dh;
+            source: root.frame;
+            image-rendering: smooth;
+        }
+        if !root.has-frame: VerticalLayout {
+            alignment: center;
+            spacing: 16px;
+            HorizontalLayout { alignment: center; KSpinner { width: 32px; height: 32px; } }
+            Text {
+                text: root.status;
+                color: #ffffffc0;
+                horizontal-alignment: center;
+                font-size: 15px;
             }
         }
+        area := TouchArea {
+            mouse-cursor: root.has-frame ? MouseCursor.none : MouseCursor.default;
+            changed mouse-x => { root.report(); }
+            changed mouse-y => { root.report(); }
+            pointer-event(e) => {
+                if e.kind == PointerEventKind.down || e.kind == PointerEventKind.up {
+                    root.report();
+                    root.pointer-button(
+                        e.button == PointerEventButton.left ? 1
+                        : e.button == PointerEventButton.right ? 2
+                        : e.button == PointerEventButton.middle ? 3
+                        : e.button == PointerEventButton.back ? 4
+                        : e.button == PointerEventButton.forward ? 5 : 0,
+                        e.kind == PointerEventKind.down);
+                }
+            }
+            scroll-event(e) => {
+                root.scrolled(e.delta-x, e.delta-y);
+                accept
+            }
+        }
+    }
     }
 
     function report() {
@@ -559,7 +574,7 @@ export component SessionWindow inherits Window {
 export global Messages {
     pure public function invalid-address(a: string) -> string { @tr("“{}” is not a valid address", a) }
     pure public function cannot-resolve(h: string) -> string { @tr("Cannot find “{}” on the network", h) }
-    pure public function unreachable(h: string) -> string { @tr("{} does not answer. Is Okno running there with connections allowed?", h) }
+    pure public function unreachable(h: string) -> string { @tr("{} does not answer. Is Okno running there with remote control allowed?", h) }
     pure public function timeout() -> string { @tr("The device did not answer in time") }
     pure public function version() -> string { @tr("The device runs an incompatible version of Okno") }
     pure public function refused(r: string) -> string { @tr("The device refused the connection: {}", r) }
@@ -588,4 +603,5 @@ export global Messages {
     pure public function display-name(i: int, name: string, w: int, h: int) -> string { @tr("{}: {} ({}×{})", i, name, w, h) }
     pure public function device-subtitle(addr: string, os: string) -> string { @tr("{} · {}", addr, os) }
     pure public function forgotten() -> string { @tr("Device forgotten") }
+    pure public function name-saved() -> string { @tr("Device name saved") }
 }
