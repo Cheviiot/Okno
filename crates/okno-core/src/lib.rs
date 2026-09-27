@@ -9,7 +9,7 @@ pub mod endpoint;
 pub mod host;
 pub mod remote;
 
-pub use config::{Config, HostConfig, Store};
+pub use config::{ClientConfig, Config, HostConfig, Store};
 pub use endpoint::Endpoint;
 
 /// `linux` or `windows`, as sent in `Hello` and discovery.

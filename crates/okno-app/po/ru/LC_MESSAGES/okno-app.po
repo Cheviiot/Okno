@@ -1,0 +1,254 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ru\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Devices"
+msgstr "Устройства"
+
+msgid "Search again"
+msgstr "Искать снова"
+
+msgid "Connect by address"
+msgstr "Подключение по адресу"
+
+msgid "A name or IP address on this network, optionally with a port."
+msgstr "Имя или IP-адрес в этой сети, при необходимости с портом."
+
+msgid "e.g. 192.168.1.20 or desk.local"
+msgstr "например, 192.168.1.20 или desk.local"
+
+msgid "Connect"
+msgstr "Подключиться"
+
+msgid "On this network"
+msgstr "В этой сети"
+
+msgid "Searching…"
+msgstr "Поиск…"
+
+msgid "No devices found"
+msgstr "Устройства не найдены"
+
+msgid "Hosts appear here when Okno is running with incoming connections allowed."
+msgstr "Здесь появятся компьютеры, на которых запущен Okno и разрешены входящие подключения."
+
+msgid "Trusted devices"
+msgstr "Доверенные устройства"
+
+msgid "Devices whose key you have accepted."
+msgstr "Устройства, ключ которых вы приняли."
+
+msgid "Forget"
+msgstr "Забыть"
+
+msgid "This Computer"
+msgstr "Этот компьютер"
+
+msgid "Allow remote control"
+msgstr "Разрешить удалённое управление"
+
+msgid "Visible on the network"
+msgstr "Виден в сети"
+
+msgid "Announce this computer so others find it without typing an address."
+msgstr "Сообщать о компьютере в сети, чтобы его находили без ввода адреса."
+
+msgid "Identity"
+msgstr "Удостоверение"
+
+msgid "People connecting to you see this fingerprint the first time. Compare it before they trust it."
+msgstr "При первом подключении собеседник увидит этот отпечаток. Сверьте его, прежде чем он доверится."
+
+msgid "Fingerprint"
+msgstr "Отпечаток"
+
+msgid "Addresses"
+msgstr "Адреса"
+
+msgid "Not listening"
+msgstr "Подключения не принимаются"
+
+msgid "Login"
+msgstr "Вход"
+
+msgid "Current username: "
+msgstr "Текущее имя пользователя: "
+
+msgid "Set a username and password before allowing connections."
+msgstr "Задайте имя пользователя и пароль, прежде чем разрешать подключения."
+
+msgid "Username"
+msgstr "Имя пользователя"
+
+msgid "Password"
+msgstr "Пароль"
+
+msgid "Repeat password"
+msgstr "Повтор пароля"
+
+msgid "Change login"
+msgstr "Изменить"
+
+msgid "Save login"
+msgstr "Сохранить"
+
+msgid "Connected now"
+msgstr "Подключены сейчас"
+
+msgid "Disconnect"
+msgstr "Отключить"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "This device"
+msgstr "Это устройство"
+
+msgid "Device name"
+msgstr "Имя устройства"
+
+msgid "Shown to other devices on the network."
+msgstr "Видно другим устройствам в сети."
+
+msgid "Device fingerprint"
+msgstr "Отпечаток устройства"
+
+msgid "About"
+msgstr "О программе"
+
+msgid "Remote desktop for the local network. GPL-3.0-only."
+msgstr "Удалённый рабочий стол для локальной сети. GPL-3.0-only."
+
+msgid "Connecting…"
+msgstr "Подключение…"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "New device"
+msgstr "Новое устройство"
+
+msgid "You are connecting to “{}” for the first time. Check that this fingerprint matches the one shown on that computer in This Computer → Identity."
+msgstr "Вы впервые подключаетесь к «{}». Убедитесь, что отпечаток совпадает с показанным на том компьютере в разделе «Этот компьютер → Удостоверение»."
+
+msgid "Trust"
+msgstr "Доверять"
+
+msgid "Device key changed"
+msgstr "Ключ устройства изменился"
+
+msgid "The device at this address now has a different key. This happens after reinstalling Okno — or when someone impersonates the device. Connect only if you know why it changed."
+msgstr "У устройства по этому адресу теперь другой ключ. Так бывает после переустановки Okno — или когда кто-то выдаёт себя за это устройство. Подключайтесь, только если знаете причину."
+
+msgid "Was: {}"
+msgstr "Был: {}"
+
+msgid "Now: {}"
+msgstr "Сейчас: {}"
+
+msgid "Trust new key"
+msgstr "Доверять новому ключу"
+
+msgid "Log in to {}"
+msgstr "Вход на {}"
+
+msgid "Enter the login set on that computer."
+msgstr "Введите данные входа, заданные на том компьютере."
+
+msgid "Checking…"
+msgstr "Проверка…"
+
+msgid "Full screen"
+msgstr "Во весь экран"
+
+msgid "“{}” is not a valid address"
+msgstr "«{}» — неверный адрес"
+
+msgid "Cannot find “{}” on the network"
+msgstr "Не удалось найти «{}» в сети"
+
+msgid "{} does not answer. Is Okno running there with connections allowed?"
+msgstr "{} не отвечает. Запущен ли там Okno с разрешёнными подключениями?"
+
+msgid "The device did not answer in time"
+msgstr "Устройство не ответило вовремя"
+
+msgid "The device runs an incompatible version of Okno"
+msgstr "На устройстве несовместимая версия Okno"
+
+msgid "The device refused the connection: {}"
+msgstr "Устройство отклонило подключение: {}"
+
+msgid "The device is busy, try again in a moment"
+msgstr "Устройство занято, попробуйте чуть позже"
+
+msgid "The device has no login set yet"
+msgstr "На устройстве ещё не заданы данные входа"
+
+msgid "Unexpected reply from the device"
+msgstr "Неожиданный ответ устройства"
+
+msgid "Wrong username or password"
+msgstr "Неверное имя пользователя или пароль"
+
+msgid "Too many attempts. Try again in {} s"
+msgstr "Слишком много попыток. Повторите через {} с"
+
+msgid "Connection lost: {}"
+msgstr "Соединение потеряно: {}"
+
+msgid "Others cannot connect to this computer"
+msgstr "Подключиться к этому компьютеру нельзя"
+
+msgid "Set a login below first"
+msgstr "Сначала задайте данные входа ниже"
+
+msgid "Waiting for screen sharing permission…"
+msgstr "Ожидание разрешения на доступ к экрану…"
+
+msgid "Waiting for connections on port {}"
+msgstr "Ожидание подключений на порту {}"
+
+msgid "Screen sharing was not allowed"
+msgstr "Доступ к экрану не разрешён"
+
+msgid "Could not start: {}"
+msgstr "Не удалось запустить: {}"
+
+msgid "Passwords do not match"
+msgstr "Пароли не совпадают"
+
+msgid "Invalid login: {}"
+msgstr "Неверные данные входа: {}"
+
+msgid "Login saved"
+msgstr "Данные входа сохранены"
+
+msgid "{} as {}"
+msgstr "{}, пользователь {}"
+
+msgid "Waiting for the picture…"
+msgstr "Ожидание изображения…"
+
+msgid "The session has ended"
+msgstr "Сеанс завершён"
+
+msgid "The session has ended: {}"
+msgstr "Сеанс завершён: {}"
+
+msgid "{}: {} ({}×{})"
+msgstr "{}: {} ({}×{})"
+
+msgid "{} · {}"
+msgstr "{} · {}"
+
+msgid "Device forgotten"
+msgstr "Устройство забыто"
+
+msgid "{n} device connected"
+msgid_plural "{n} devices connected"
+msgstr[0] "Подключено {n} устройство"
+msgstr[1] "Подключено {n} устройства"
+msgstr[2] "Подключено {n} устройств"

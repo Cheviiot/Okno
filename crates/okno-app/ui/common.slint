@@ -1,0 +1,29 @@
+// Types shared by the widget kits and the screens.
+
+export struct NavItem {
+    title: string,
+    icon: image,
+}
+
+export struct HeaderAction {
+    icon: image,
+    tooltip: string,
+}
+
+export global Icons {
+    out property <image> devices: @image-url("icons/devices.svg");
+    out property <image> host: @image-url("icons/host.svg");
+    out property <image> settings: @image-url("icons/settings.svg");
+    out property <image> refresh: @image-url("icons/refresh.svg");
+    out property <image> go: @image-url("icons/go.svg");
+    out property <image> close: @image-url("icons/close.svg");
+    out property <image> fullscreen: @image-url("icons/fullscreen.svg");
+    out property <image> key: @image-url("icons/key.svg");
+    out property <image> warning: @image-url("icons/warning.svg");
+    out property <image> power: @image-url("icons/power.svg");
+    out property <image> display: @image-url("icons/display.svg");
+    out property <image> star: @image-url("icons/star.svg");
+    out property <image> trash: @image-url("icons/trash.svg");
+    out property <image> ok: @image-url("icons/ok.svg");
+    out property <image> link: @image-url("icons/link.svg");
+}

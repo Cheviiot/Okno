@@ -81,3 +81,24 @@ async fn host_refuses_networks_outside_allowlist() {
     assert!(result.is_err());
     assert!(matches!(events.recv().await.unwrap(), HostEvent::Refused { .. }));
 }
+
+#[tokio::test]
+async fn host_can_disconnect_and_change_password() {
+    let (host, endpoint, _) = start_host(AllowList::default()).await;
+    let mut events = host.subscribe();
+    let mut pending = client::open(&endpoint, &Identity::generate(), &TrustStore::default(), "c").await.unwrap();
+    pending.login("admin", "hunter22").await.unwrap();
+    let mut session = pending.into_session();
+    let id = loop {
+        if let HostEvent::SessionOpened(info) = events.recv().await.unwrap() {
+            break info.id;
+        }
+    };
+    assert!(host.disconnect(id));
+    assert!(session.ping().await.is_err());
+
+    host.set_credentials(Credentials::new("admin", "new-password").unwrap());
+    let mut pending = client::open(&endpoint, &Identity::generate(), &TrustStore::default(), "c").await.unwrap();
+    assert!(pending.login("admin", "hunter22").await.is_err());
+    pending.login("admin", "new-password").await.unwrap();
+}

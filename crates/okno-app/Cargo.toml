@@ -1,0 +1,29 @@
+[package]
+name = "okno-app"
+description = "Okno desktop application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "okno"
+path = "src/main.rs"
+
+[dependencies]
+okno-proto.workspace = true
+okno-net.workspace = true
+okno-auth.workspace = true
+okno-discovery.workspace = true
+okno-desktop.workspace = true
+okno-core.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+sys-locale = "0.3"
+if-addrs.workspace = true
+slint = { version = "1.18", features = ["unstable-winit-030"] }
+
+[build-dependencies]
+slint-build = "1.18"

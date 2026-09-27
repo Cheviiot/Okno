@@ -1,0 +1,499 @@
+// Widget kit that follows Windows 11 Fluent (WinUI 3 colours and metrics).
+// Must export the same components and properties as kit/adwaita/kit.slint.
+
+import { Palette, ScrollView, Spinner } from "std-widgets.slint";
+import { NavItem, HeaderAction } from "../../common.slint";
+
+export global Theme {
+    in-out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+    out property <string> kit: "fluent";
+
+    out property <color> window-bg: dark ? #202020 : #f3f3f3;
+    out property <color> view-bg: dark ? #272727 : #f9f9f9;
+    out property <color> card-bg: dark ? #2b2b2b : #fbfbfb;
+    out property <color> sidebar-bg: window-bg;
+    out property <color> headerbar-bg: window-bg;
+    out property <color> dialog-bg: dark ? #2b2b2b : #ffffff;
+    out property <color> fg: dark ? #ffffff : #1a1a1a;
+    out property <color> dim-fg: dark ? #cfcfcf : #5d5d5d;
+    out property <color> accent: dark ? #60cdff : #005fb8;
+    out property <color> accent-fg: dark ? #000000 : #ffffff;
+    out property <color> accent-text: dark ? #99ebff : #003e92;
+    out property <color> destructive: dark ? #ff99a4 : #c42b1c;
+    out property <color> destructive-text: destructive;
+    out property <color> success: dark ? #6ccb5f : #0f7b0f;
+    out property <color> warning: dark ? #fce100 : #9d5d00;
+    out property <color> separator: dark ? #ffffff15 : #0000000f;
+    out property <color> shade: dark ? #0000004d : #0000000f;
+    out property <color> control: dark ? #ffffff0f : #ffffffb3;
+    out property <color> control-hover: dark ? #ffffff15 : #f9f9f980;
+    out property <color> control-active: dark ? #ffffff08 : #f9f9f94d;
+    out property <color> subtle-hover: dark ? #ffffff0f : #0000000a;
+    out property <color> subtle-active: dark ? #ffffff0b : #00000006;
+    out property <color> stroke: dark ? #ffffff12 : #0000000f;
+    out property <color> stroke-bottom: dark ? #ffffff18 : #00000029;
+
+    out property <length> radius-control: 4px;
+    out property <length> radius-card: 8px;
+    out property <length> font-body: 14px;
+    out property <length> font-small: 12px;
+    out property <length> font-heading: 14px;
+    out property <length> font-title: 28px;
+    out property <string> font-family: "Segoe UI Variable Text";
+    out property <string> mono-family: "Cascadia Mono";
+}
+
+export component KText inherits Text {
+    color: Theme.fg;
+    font-size: Theme.font-body;
+    font-family: Theme.font-family;
+}
+
+export component KIcon inherits Rectangle {
+    in property <image> source;
+    in property <color> tint: Theme.fg;
+    in property <length> size: 16px;
+    width: size;
+    min-height: size;
+    Image {
+        width: root.size;
+        height: root.size;
+        y: (parent.height - self.height) / 2;
+        source: root.source;
+        colorize: root.tint;
+    }
+}
+
+export component KButton inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> has-icon: false;
+    in property <bool> primary;
+    in property <bool> destructive;
+    in property <bool> flat;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    min-height: 32px;
+    min-width: 32px;
+    border-radius: Theme.radius-control;
+    border-width: (flat || primary || destructive) ? 0px : 1px;
+    border-color: Theme.stroke;
+    opacity: enabled ? 1 : 0.45;
+    background: primary ? (touch.pressed ? Theme.accent.transparentize(20%) : touch.has-hover ? Theme.accent.transparentize(10%) : Theme.accent)
+        : destructive ? (touch.pressed ? Theme.destructive.transparentize(20%) : touch.has-hover ? Theme.destructive.transparentize(10%) : Theme.destructive)
+        : flat ? (touch.pressed ? Theme.subtle-active : touch.has-hover ? Theme.subtle-hover : transparent)
+        : touch.pressed ? Theme.control-active
+        : touch.has-hover ? Theme.control-hover
+        : Theme.control;
+    animate background { duration: 83ms; }
+
+    accessible-role: button;
+    accessible-label: text;
+    accessible-action-default => { clicked(); }
+
+    // Elevation line under standard buttons.
+    if !flat && !primary && !destructive: Rectangle {
+        y: parent.height - 1px;
+        x: Theme.radius-control;
+        width: parent.width - 2 * Theme.radius-control;
+        height: 1px;
+        background: Theme.stroke-bottom;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: text == "" ? 8px : 12px;
+        padding-right: text == "" ? 8px : 12px;
+        spacing: 8px;
+        alignment: center;
+        if has-icon: KIcon {
+            source: icon;
+            tint: (primary || destructive) ? Theme.accent-fg : Theme.fg;
+        }
+        if text != "": KText {
+            text: root.text;
+            vertical-alignment: center;
+            color: (primary || destructive) ? Theme.accent-fg : Theme.fg;
+        }
+    }
+}
+
+export component KIconButton inherits KButton {
+    in property <string> tooltip;
+    has-icon: true;
+    flat: true;
+    accessible-label: tooltip;
+}
+
+export component KEntry inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <bool> password;
+    in property <bool> enabled: true;
+    in property <bool> error;
+    in property <bool> mono;
+    callback accepted;
+    callback edited;
+    forward-focus: input;
+
+    min-height: 32px;
+    min-width: 120px;
+    border-radius: Theme.radius-control;
+    background: input.has-focus ? (Theme.dark ? #1f1f1f : #ffffff) : Theme.control;
+    border-width: 1px;
+    border-color: Theme.stroke;
+    opacity: enabled ? 1 : 0.45;
+
+    // Bottom line: thin grey normally, 2 px accent (or red) when focused.
+    Rectangle {
+        y: parent.height - self.height;
+        x: 1px;
+        width: parent.width - 2px;
+        height: input.has-focus || error ? 2px : 1px;
+        background: error ? Theme.destructive : input.has-focus ? Theme.accent : Theme.stroke-bottom;
+    }
+    KText {
+        x: 11px;
+        width: parent.width - 22px;
+        height: parent.height;
+        visible: root.text == "";
+        text: root.placeholder;
+        color: Theme.dim-fg;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 11px;
+        input := TextInput {
+            text <=> root.text;
+            enabled: root.enabled;
+            input-type: password ? InputType.password : InputType.text;
+            vertical-alignment: center;
+            color: Theme.fg;
+            selection-background-color: Theme.accent.transparentize(50%);
+            font-size: Theme.font-body;
+            font-family: mono ? Theme.mono-family : Theme.font-family;
+            single-line: true;
+            accessible-role: text-input;
+            accessible-placeholder-text: placeholder;
+            accepted => { root.accepted(); }
+            edited => { root.edited(); }
+        }
+    }
+}
+
+export component KSwitch inherits Rectangle {
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    // The root fills the layout cell; the visible track is centred in it.
+    width: 40px;
+    min-height: 20px;
+    opacity: enabled ? 1 : 0.45;
+    accessible-role: switch;
+    accessible-checked: checked;
+    accessible-action-default => { touch.clicked(); }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: 20px;
+        border-radius: 10px;
+        background: root.checked ? Theme.accent : (touch.has-hover ? Theme.subtle-hover : transparent);
+        border-width: root.checked ? 0px : 1px;
+        border-color: Theme.dim-fg;
+        Rectangle {
+            property <length> size: touch.has-hover ? 14px : 12px;
+            width: size;
+            height: size;
+            y: (parent.height - self.height) / 2;
+            x: root.checked ? parent.width - self.width - 4px : 4px;
+            border-radius: self.width / 2;
+            background: root.checked ? Theme.accent-fg : Theme.dim-fg;
+            animate x, width, height { duration: 167ms; easing: ease-out; }
+        }
+    }
+}
+
+// A settings section: a heading and a stack of setting cards.
+export component KGroup inherits VerticalLayout {
+    in property <string> title;
+    in property <string> description;
+    spacing: 4px;
+
+    if title != "": VerticalLayout {
+        spacing: 2px;
+        padding-bottom: 4px;
+        KText {
+            text: title;
+            font-weight: 600;
+            font-size: Theme.font-heading;
+        }
+        if description != "": KText {
+            text: description;
+            color: Theme.dim-fg;
+            font-size: Theme.font-small;
+            wrap: word-wrap;
+        }
+    }
+    VerticalLayout {
+        spacing: 3px;
+        @children
+    }
+}
+
+// One settings card; children go to the end (suffix widgets).
+export component KRow inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <image> icon;
+    in property <bool> has-icon;
+    in property <bool> activatable;
+    in property <bool> last;
+    in property <bool> mono-subtitle;
+    callback clicked;
+
+    min-height: subtitle == "" ? 52px : 64px;
+    border-radius: Theme.radius-control;
+    border-width: 1px;
+    border-color: Theme.stroke;
+    background: activatable && touch.pressed ? Theme.control-active : activatable && touch.has-hover ? Theme.control-hover : Theme.card-bg;
+    accessible-role: button;
+    accessible-label: title;
+    accessible-action-default => { clicked(); }
+
+    touch := TouchArea {
+        enabled: root.activatable;
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 16px;
+        if has-icon: KIcon {
+            size: 20px;
+            source: icon;
+        }
+        if title != "" || subtitle != "": VerticalLayout {
+            alignment: center;
+            spacing: 1px;
+            horizontal-stretch: 1;
+            KText {
+                text: title;
+                overflow: elide;
+            }
+            if subtitle != "": KText {
+                text: subtitle;
+                color: Theme.dim-fg;
+                font-size: Theme.font-small;
+                font-family: mono-subtitle ? Theme.mono-family : Theme.font-family;
+                overflow: elide;
+            }
+        }
+        HorizontalLayout {
+            alignment: title == "" && subtitle == "" ? LayoutAlignment.stretch : LayoutAlignment.end;
+            horizontal-stretch: title == "" && subtitle == "" ? 1 : 0;
+            spacing: 8px;
+            @children
+        }
+    }
+}
+
+// A scrolling page with a large title; actions sit right of the title.
+export component KPage inherits Rectangle {
+    in property <string> title;
+    in property <[HeaderAction]> actions;
+    callback action(int);
+
+    background: Theme.view-bg;
+    border-radius: 8px;
+
+    ScrollView {
+        VerticalLayout {
+            padding-top: 28px;
+            padding-bottom: 28px;
+            padding-left: 40px;
+            padding-right: max(40px, parent.width - 1000px - 40px);
+            spacing: 28px;
+            alignment: start;
+            HorizontalLayout {
+                spacing: 8px;
+                KText {
+                    text: root.title;
+                    font-size: Theme.font-title;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                for a[i] in actions: KIconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: a.icon;
+                    tooltip: a.tooltip;
+                    clicked => { root.action(i); }
+                }
+            }
+            @children
+        }
+    }
+}
+
+export component KSidebar inherits Rectangle {
+    in property <[NavItem]> items;
+    in-out property <int> current;
+    in property <string> app-title;
+
+    width: 260px;
+    background: Theme.sidebar-bg;
+
+    VerticalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        Rectangle {
+            height: 48px;
+            KText {
+                x: 16px;
+                text: app-title;
+                font-size: Theme.font-small;
+                vertical-alignment: center;
+            }
+        }
+        VerticalLayout {
+            spacing: 4px;
+            alignment: start;
+            for item[i] in items: Rectangle {
+                height: 36px;
+                border-radius: Theme.radius-control;
+                background: i == current ? Theme.subtle-hover : area.pressed ? Theme.subtle-active : area.has-hover ? Theme.subtle-hover : transparent;
+                accessible-role: tab;
+                accessible-label: item.title;
+                accessible-item-selected: i == current;
+                accessible-action-default => { root.current = i; }
+                area := TouchArea {
+                    clicked => { root.current = i; }
+                }
+                // Selection pill.
+                if i == current: Rectangle {
+                    x: 0;
+                    width: 3px;
+                    height: 16px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 1.5px;
+                    background: Theme.accent;
+                }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    spacing: 16px;
+                    KIcon {
+                        source: item.icon;
+                    }
+                    KText {
+                        text: item.title;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Modal dialog over the whole window (WinUI ContentDialog).
+export component KDialog inherits Rectangle {
+    in property <string> title;
+    in property <string> body;
+    in property <bool> warning;
+
+    background: Theme.dark ? #0000004d : #0000004d;
+    TouchArea { }
+
+    Rectangle {
+        width: min(448px, parent.width - 24px);
+        height: content.preferred-height;
+        border-radius: Theme.radius-card;
+        background: Theme.dialog-bg;
+        border-width: 1px;
+        border-color: Theme.stroke;
+        drop-shadow-blur: 32px;
+        drop-shadow-color: #00000047;
+        drop-shadow-offset-y: 8px;
+        content := VerticalLayout {
+            padding: 24px;
+            spacing: 12px;
+            HorizontalLayout {
+                spacing: 12px;
+                if warning: KIcon {
+                    size: 20px;
+                    source: @image-url("../../icons/warning.svg");
+                    tint: Theme.warning;
+                }
+                KText {
+                    text: title;
+                    font-size: 20px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+            if body != "": KText {
+                text: body;
+                wrap: word-wrap;
+            }
+            @children
+        }
+    }
+}
+
+export component KDialogButtons inherits HorizontalLayout {
+    spacing: 8px;
+    padding-top: 12px;
+    alignment: stretch;
+    @children
+}
+
+export component KToast inherits Rectangle {
+    in property <string> text;
+    in property <bool> error;
+    height: 48px;
+    width: min(label.preferred-width + 48px, 560px);
+    border-radius: Theme.radius-control;
+    background: error ? (Theme.dark ? #442726 : #fde7e9) : Theme.dialog-bg;
+    border-width: 1px;
+    border-color: Theme.stroke;
+    drop-shadow-blur: 16px;
+    drop-shadow-color: #00000030;
+    drop-shadow-offset-y: 4px;
+    label := KText {
+        text: root.text;
+        overflow: elide;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component KSpinner inherits Spinner {
+    indeterminate: true;
+    width: 24px;
+    height: 24px;
+}
+
+export component KCaption inherits KText {
+    color: Theme.dim-fg;
+    font-size: Theme.font-small;
+    wrap: word-wrap;
+}

@@ -58,6 +58,11 @@ impl Remote {
         self.sender.send(Msg::VideoStart(VideoStart { display, max_fps, bitrate_kbps })).await
     }
 
+    /// Like [`start_video`](Self::start_video) without waiting; for UI code.
+    pub fn request_video(&self, display: u32, max_fps: u32, bitrate_kbps: u32) {
+        let _ = self.sender.try_send(Msg::VideoStart(VideoStart { display, max_fps, bitrate_kbps }));
+    }
+
     pub async fn stop_video(&self) -> Result<(), okno_net::Error> {
         self.sender.send(Msg::VideoStop(VideoStop {})).await
     }

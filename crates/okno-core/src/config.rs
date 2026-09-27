@@ -20,11 +20,19 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub device_name: String,
     pub host: HostConfig,
+    pub client: ClientConfig,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClientConfig {
+    /// Username typed last time, offered in the login dialog.
+    pub last_username: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { device_name: crate::default_device_name(), host: HostConfig::default() }
+        Self { device_name: crate::default_device_name(), host: HostConfig::default(), client: ClientConfig::default() }
     }
 }
 

@@ -4,11 +4,12 @@
 //! through: allowlist → Noise handshake → `Hello` exchange → `Login` (with
 //! throttling) → `HostInfo`, and is then handed to a [`SessionHandler`].
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use okno_auth::{AllowList, Credentials, LoginThrottle, ThrottleDecision};
@@ -18,7 +19,7 @@ use okno_proto::envelope::Msg;
 use okno_proto::{Close, Display, ErrorMsg, Hello, HostInfo, LoginResult, LoginStatus, PROTOCOL_VERSION};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, watch};
-use tokio::task::JoinHandle;
+use tokio::task::{AbortHandle, JoinHandle};
 use zeroize::Zeroizing;
 
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
@@ -114,20 +115,24 @@ pub enum HostError {
 struct Shared {
     identity: Identity,
     settings: HostSettings,
+    /// Replaceable while running (`Host::set_credentials`).
+    credentials: RwLock<Credentials>,
     handler: Arc<dyn SessionHandler>,
     throttle: LoginThrottle,
     events: broadcast::Sender<HostEvent>,
     shutdown: watch::Receiver<bool>,
     next_id: AtomicU64,
+    /// Connection tasks by session id, for `Host::disconnect`.
+    connections: Mutex<HashMap<u64, AbortHandle>>,
 }
 
 /// A running host. Dropping it stops listening and ends all sessions.
 pub struct Host {
-    events: broadcast::Sender<HostEvent>,
+    shared: Arc<Shared>,
     addrs: Vec<SocketAddr>,
     stop: watch::Sender<bool>,
     tasks: Vec<JoinHandle<()>>,
-    _announcer: Option<Announcer>,
+    announcer: Mutex<Option<Announcer>>,
 }
 
 impl Host {
@@ -147,34 +152,30 @@ impl Host {
         }
         let addrs: Vec<SocketAddr> = listeners.iter().filter_map(|l| l.local_addr().ok()).collect();
 
-        let announcer = if settings.discoverable {
-            Some(
-                Announcer::start(HostAnnouncement {
-                    name: settings.device_name.clone(),
-                    os: crate::os_name().into(),
-                    fingerprint: identity.fingerprint(),
-                    port: addrs[0].port(),
-                })
-                .await,
-            )
-        } else {
-            None
+        let announcement = HostAnnouncement {
+            name: settings.device_name.clone(),
+            os: crate::os_name().into(),
+            fingerprint: identity.fingerprint(),
+            port: addrs[0].port(),
         };
+        let announcer = if settings.discoverable { Some(Announcer::start(announcement).await) } else { None };
 
         let (events, _) = broadcast::channel(64);
         let (stop, shutdown) = watch::channel(false);
         let shared = Arc::new(Shared {
             identity,
+            credentials: RwLock::new(settings.credentials.clone()),
             settings,
             handler,
             throttle: LoginThrottle::default(),
             events: events.clone(),
             shutdown,
             next_id: AtomicU64::new(1),
+            connections: Mutex::default(),
         });
         let tasks = listeners.into_iter().map(|listener| tokio::spawn(accept_loop(listener, shared.clone()))).collect();
         let _ = events.send(HostEvent::Listening(addrs.clone()));
-        Ok(Self { events, addrs, stop, tasks, _announcer: announcer })
+        Ok(Self { shared, addrs, stop, tasks, announcer: Mutex::new(announcer) })
     }
 
     pub fn local_addrs(&self) -> &[SocketAddr] {
@@ -182,7 +183,44 @@ impl Host {
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<HostEvent> {
-        self.events.subscribe()
+        self.shared.events.subscribe()
+    }
+
+    pub fn fingerprint(&self) -> Fingerprint {
+        self.shared.identity.fingerprint()
+    }
+
+    /// New logins are checked against `credentials`; open sessions stay.
+    pub fn set_credentials(&self, credentials: Credentials) {
+        *self.shared.credentials.write().unwrap() = credentials;
+    }
+
+    /// Starts or stops announcing the host on the network.
+    pub async fn set_discoverable(&self, on: bool, name: &str) {
+        let current = self.announcer.lock().unwrap().take();
+        drop(current);
+        if on {
+            let announcer = Announcer::start(HostAnnouncement {
+                name: name.to_owned(),
+                os: crate::os_name().into(),
+                fingerprint: self.fingerprint(),
+                port: self.addrs[0].port(),
+            })
+            .await;
+            *self.announcer.lock().unwrap() = Some(announcer);
+        }
+    }
+
+    /// Ends a session; the client sees the connection close.
+    pub fn disconnect(&self, id: u64) -> bool {
+        match self.shared.connections.lock().unwrap().remove(&id) {
+            Some(handle) => {
+                handle.abort();
+                let _ = self.shared.events.send(HostEvent::SessionClosed { id, reason: "disconnected by host".into() });
+                true
+            }
+            None => false,
+        }
     }
 }
 
@@ -191,6 +229,9 @@ impl Drop for Host {
         let _ = self.stop.send(true);
         for task in &self.tasks {
             task.abort();
+        }
+        for (_, handle) in self.shared.connections.lock().unwrap().drain() {
+            handle.abort();
         }
     }
 }
@@ -239,16 +280,27 @@ async fn accept_loop(listener: TcpListener, shared: Arc<Shared>) {
             let _ = shared.events.send(HostEvent::Refused { peer });
             continue;
         }
-        let shared = shared.clone();
-        tokio::spawn(async move {
-            let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
-            let reason = match serve(stream, peer, id, &shared).await {
+        let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
+        let task_shared = shared.clone();
+        // Hold the lock across spawn so the task cannot look itself up
+        // before it is registered.
+        let mut connections = shared.connections.lock().unwrap();
+        let task = tokio::spawn(async move {
+            let shared = task_shared;
+            let result = serve(stream, peer, id, &shared).await;
+            // Gone from the map means `disconnect` already reported it.
+            let known = shared.connections.lock().unwrap().remove(&id).is_some();
+            let reason = match result {
                 Ok(Some(reason)) => reason,
                 Ok(None) => return,
                 Err(e) => e,
             };
-            let _ = shared.events.send(HostEvent::SessionClosed { id, reason });
+            if known {
+                let _ = shared.events.send(HostEvent::SessionClosed { id, reason });
+            }
         });
+        connections.insert(id, task.abort_handle());
+        drop(connections);
     }
 }
 
@@ -330,7 +382,7 @@ async fn login(
             sender.send(reply(LoginStatus::Throttled, wait)).await.map_err(|e| e.to_string())?;
             LoginStatus::Throttled
         } else if let Some(_permit) = shared.throttle.try_begin() {
-            let creds = shared.settings.credentials.clone();
+            let creds = shared.credentials.read().unwrap().clone();
             let username = login.username.clone();
             let ok = tokio::task::spawn_blocking(move || creds.verify(&username, password)).await.unwrap_or(false);
             if ok {
