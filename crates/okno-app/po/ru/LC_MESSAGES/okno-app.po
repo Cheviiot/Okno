@@ -531,3 +531,6 @@ msgstr "Параметры сохранены"
 
 msgid "Enter a port between 1 and 65535"
 msgstr "Укажите порт от 1 до 65535"
+
+msgid "Remember Password"
+msgstr "Запомнить пароль"

@@ -36,6 +36,8 @@ pub struct App {
     pending: RefCell<Option<Pending>>,
     /// Bumped per connection attempt; cancelled attempts see a newer value.
     attempt: Cell<u64>,
+    /// The running login uses a saved password (no dialog shown).
+    auto_login: Cell<bool>,
     sessions: RefCell<Vec<Rc<SessionView>>>,
     toast_timer: slint::Timer,
     discovery_timer: slint::Timer,
@@ -89,6 +91,7 @@ impl App {
             trust: RefCell::new(trust),
             pending: RefCell::default(),
             attempt: Cell::new(0),
+            auto_login: Cell::new(false),
             sessions: RefCell::default(),
             toast_timer: slint::Timer::default(),
             discovery_timer: slint::Timer::default(),
@@ -187,6 +190,8 @@ impl App {
         w.on_forget(move |fingerprint| {
             let Some(app) = weak.upgrade() else { return };
             if let Some(fp) = okno_net::Fingerprint::from_hex(&fingerprint) {
+                let hex = fp.to_hex();
+                app.rt.spawn_blocking(move || crate::secrets::forget(&hex));
                 app.trust.borrow_mut().forget(&fp);
                 app.save_trust();
                 app.show_recent();
@@ -325,6 +330,27 @@ impl App {
             w.set_dialog_fingerprint(two_lines(&pending.fingerprint.display_short()).into());
             w.set_login_error(SharedString::new());
             w.set_login_password(SharedString::new());
+            let known = matches!(pending.trust, TrustDecision::Trusted | TrustDecision::KnownElsewhere);
+            let fingerprint = pending.fingerprint.to_hex();
+            *app.pending.borrow_mut() = Some(pending);
+            if known {
+                // A saved login connects without asking.
+                let saved = app.rt.spawn_blocking(move || crate::secrets::load(&fingerprint)).await.ok().flatten();
+                if app.attempt.get() != attempt {
+                    return;
+                }
+                if let Some((user, password)) = saved {
+                    app.window.set_login_user(user.into());
+                    app.window.set_login_password(password.into());
+                    app.window.set_login_remember(true);
+                    app.auto_login.set(true);
+                    app.login();
+                    return;
+                }
+            }
+            let Some(pending) = app.pending.borrow_mut().take() else { return };
+            let w = &app.window;
+            w.set_login_remember(false);
             let dialog = match &pending.trust {
                 TrustDecision::Trusted | TrustDecision::KnownElsewhere => DialogKind::Login,
                 TrustDecision::New => DialogKind::TrustNew,
@@ -401,12 +427,22 @@ impl App {
             match result {
                 Ok(()) => app.logged_in(pending, user),
                 Err(e @ (ClientError::BadCredentials { .. } | ClientError::Throttled { .. } | ClientError::Busy)) => {
+                    if app.auto_login.replace(false) {
+                        // The saved password no longer works: drop it and ask.
+                        if matches!(e, ClientError::BadCredentials { .. }) {
+                            let fp = pending.fingerprint.to_hex();
+                            app.rt.spawn_blocking(move || crate::secrets::forget(&fp));
+                            app.window.set_login_remember(false);
+                        }
+                        app.window.set_dialog(DialogKind::Login);
+                    }
                     let host = pending.host.device_name.clone();
                     app.window.set_login_error(app.error_text(&e, &host));
                     app.window.set_login_password(SharedString::new());
                     *app.pending.borrow_mut() = Some(pending);
                 }
                 Err(e) => {
+                    app.auto_login.set(false);
                     let host = pending.host.device_name.clone();
                     app.connection_failed(&e, &host);
                 }
@@ -416,6 +452,15 @@ impl App {
     }
 
     fn logged_in(self: &Rc<Self>, pending: Pending, user: String) {
+        self.auto_login.set(false);
+        let fp = pending.fingerprint.to_hex();
+        let password = self.window.get_login_password().to_string();
+        if self.window.get_login_remember() {
+            let user = user.clone();
+            self.rt.spawn_blocking(move || crate::secrets::save(&fp, &user, &password));
+        } else {
+            self.rt.spawn_blocking(move || crate::secrets::forget(&fp));
+        }
         let now =
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
         self.trust.borrow_mut().trust(

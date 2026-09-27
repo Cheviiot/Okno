@@ -340,6 +340,7 @@ export component MainWindow inherits KAppWindow {
     in property <string> dialog-previous;
     in-out property <string> login-user;
     in-out property <string> login-password;
+    in-out property <bool> login-remember;
     in property <string> login-error;
     in property <bool> login-busy;
     callback trust-accepted;
@@ -591,9 +592,14 @@ export component MainWindow inherits KAppWindow {
                 text <=> root.login-password;
                 enabled: !root.login-busy;
                 error: root.login-error != "";
-                last: true;
                 accepted => { root.login-submitted(); }
                 init => { self.focus(); }
+            }
+            KSwitchRow {
+                title: @tr("Remember Password");
+                checked <=> root.login-remember;
+                enabled: !root.login-busy;
+                last: true;
             }
         }
         if root.login-error != "": KCaption {

@@ -24,6 +24,7 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 sys-locale = "0.3"
 arboard = "3"
+keyring = "4"
 dirs.workspace = true
 if-addrs.workspace = true
 vt100 = "0.16"

@@ -11,6 +11,7 @@ mod host;
 mod keys;
 mod notify;
 mod picker;
+mod secrets;
 mod session;
 mod terminal_ui;
 
