@@ -190,9 +190,9 @@ impl RateControl {
         }
         let before = self.current;
         if self.drops >= 2 {
-            self.current = (self.current * 6 / 10).max(self.min);
+            self.current = (self.current.saturating_mul(6) / 10).max(self.min);
         } else if self.drops == 0 && now.duration_since(self.calm_since) >= Self::CALM {
-            self.current = (self.current * 5 / 4).min(self.max);
+            self.current = (self.current.saturating_mul(5) / 4).min(self.max);
         }
         self.drops = 0;
         if self.current == before {
@@ -225,7 +225,7 @@ impl Streamer {
         let capture = desktop.capture(start.display).map_err(|e| e.to_string())?;
         let settings = EncoderSettings {
             max_fps: if start.max_fps == 0 { 30 } else { start.max_fps.min(60) },
-            bitrate_kbps: if start.bitrate_kbps == 0 { 8000 } else { start.bitrate_kbps },
+            bitrate_kbps: if start.bitrate_kbps == 0 { 8000 } else { start.bitrate_kbps.clamp(500, 100_000) },
         };
         let mut encoder = VideoEncoder::new(settings).map_err(|e| e.to_string())?;
         let shared = Arc::new(Shared {

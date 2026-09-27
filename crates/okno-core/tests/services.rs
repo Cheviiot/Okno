@@ -106,6 +106,44 @@ async fn port_forwarding_carries_data_both_ways() {
     assert_eq!(n, 0);
 }
 
+/// More than the flow-control window one way, then a half-close: the reply
+/// written after EOF must still arrive.
+#[tokio::test(flavor = "multi_thread")]
+async fn tunnel_keeps_flow_control_and_half_close() {
+    let (_host, remote) = session().await;
+    // Counts what it receives until EOF, then answers with the count.
+    let counter = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let target = counter.local_addr().unwrap().to_string();
+    tokio::spawn(async move {
+        let (mut s, _) = counter.accept().await.unwrap();
+        let mut total = 0u64;
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            match s.read(&mut buf).await.unwrap() {
+                0 => break,
+                n => total += n as u64,
+            }
+            // A slow reader, so the window fills up.
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        s.write_all(&total.to_be_bytes()).await.unwrap();
+    });
+    let forward = remote.tunnels().forward("127.0.0.1:0".parse().unwrap(), target).await.unwrap();
+    let mut conn = tokio::net::TcpStream::connect(forward.local_addr()).await.unwrap();
+    let size = 3 * okno_core::tunnel::WINDOW + 12345;
+    let data = vec![7u8; size];
+    let (mut rd, mut wr) = conn.split();
+    let send = async {
+        wr.write_all(&data).await.unwrap();
+        wr.shutdown().await.unwrap();
+    };
+    let mut reply = [0u8; 8];
+    let receive = async { tokio::time::timeout(Duration::from_secs(20), rd.read_exact(&mut reply)).await };
+    let ((), received) = tokio::join!(send, receive);
+    received.expect("reply in time").unwrap();
+    assert_eq!(u64::from_be_bytes(reply), size as u64);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn sound_arrives_as_a_tone() {
     let (_host, remote) = session().await;

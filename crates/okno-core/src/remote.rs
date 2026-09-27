@@ -213,7 +213,7 @@ impl AudioIn {
                 }
             }
         }
-        state.next = Some(packet.seq + 1);
+        state.next = Some(packet.seq.wrapping_add(1));
         match state.decoder.decode(&packet.data) {
             Ok(samples) => state.ring.push(samples),
             Err(e) => tracing::debug!("audio decode: {e}"),
@@ -260,7 +260,12 @@ async fn read_loop(
                     let _ = sender.try_send(Msg::KeyframeRequest(KeyframeRequest {}));
                 }
             }
-            Ok(Msg::Clipboard(c)) => events(RemoteEvent::Clipboard(c.text)),
+            // The host caps what it sends; a misbehaving one must not flood
+            // the local clipboard either.
+            Ok(Msg::Clipboard(c)) if c.text.len() <= okno_desktop::MAX_CLIPBOARD => {
+                events(RemoteEvent::Clipboard(c.text))
+            }
+            Ok(Msg::Clipboard(_)) => tracing::debug!("ignoring oversized clipboard from host"),
             Ok(Msg::Audio(packet)) => audio.packet(packet),
             Ok(Msg::File(reply)) => services.files.dispatch(reply),
             Ok(Msg::Terminal(reply)) => services.terminals.dispatch(reply),

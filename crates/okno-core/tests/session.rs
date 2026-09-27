@@ -129,3 +129,70 @@ async fn host_user_can_decline_or_allow() {
     assert!(pending.login("admin", "wrong-one").await.is_err());
     assert_eq!(seen.lock().unwrap().len(), 2);
 }
+
+/// Before login a peer may not make the host buffer large messages.
+#[tokio::test]
+async fn host_drops_oversized_messages_before_login() {
+    let (_host, endpoint, _) = start_host(AllowList::default()).await;
+    let stream = tokio::net::TcpStream::connect(endpoint.to_string()).await.unwrap();
+    let conn = okno_net::connect(stream, &Identity::generate()).await.unwrap();
+    let (sender, mut receiver) = conn.into_parts();
+    let hello = okno_proto::Hello {
+        version: okno_proto::PROTOCOL_VERSION,
+        device_name: "x".repeat(200 * 1024),
+        ..Default::default()
+    };
+    sender.send(okno_proto::envelope::Msg::Hello(hello)).await.unwrap();
+    let reply = tokio::time::timeout(std::time::Duration::from_secs(5), receiver.recv()).await.expect("closed in time");
+    assert!(reply.is_err(), "{reply:?}");
+}
+
+/// A session thread that keeps a sender must not keep a disconnected
+/// client's connection open.
+#[tokio::test(flavor = "multi_thread")]
+async fn disconnect_closes_even_with_a_lingering_sender() {
+    use okno_core::host::{BoxFuture, HostSession, SessionHandler};
+
+    struct Lingering;
+    impl SessionHandler for Lingering {
+        fn run(&self, mut session: HostSession) -> BoxFuture {
+            let leaked = session.sender.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                drop(leaked);
+            });
+            Box::pin(async move {
+                while let Ok(msg) = session.receiver.recv().await {
+                    if let okno_proto::envelope::Msg::Ping(p) = msg {
+                        let _ = session.sender.send(okno_proto::envelope::Msg::Pong(p)).await;
+                    }
+                }
+                Ok(())
+            })
+        }
+    }
+
+    let settings = HostSettings {
+        device_name: "test-host".into(),
+        port: 0,
+        listen: vec![IpAddr::V4(Ipv4Addr::LOCALHOST)],
+        allowed_networks: AllowList::default(),
+        credentials: Credentials::new("admin", "hunter22").unwrap(),
+        discoverable: false,
+        services: vec![],
+        approver: None,
+    };
+    let host = Host::start(Identity::generate(), settings, Arc::new(Lingering)).await.unwrap();
+    let endpoint = Endpoint::from(host.local_addrs()[0]);
+    let mut pending = client::open(&endpoint, &Identity::generate(), &TrustStore::default(), "c").await.unwrap();
+    pending.login("admin", "hunter22").await.unwrap();
+    let mut session = pending.into_session();
+    session.ping().await.unwrap();
+    let sessions = host.sessions();
+    assert_eq!(sessions.len(), 1);
+    assert!(host.disconnect(sessions[0].id));
+    assert!(host.sessions().is_empty());
+    let started = std::time::Instant::now();
+    assert!(session.ping().await.is_err());
+    assert!(started.elapsed() < std::time::Duration::from_secs(3), "{:?}", started.elapsed());
+}

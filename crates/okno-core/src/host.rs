@@ -23,9 +23,16 @@ use tokio::task::{AbortHandle, JoinHandle};
 use zeroize::Zeroizing;
 
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
-/// The client may be showing a fingerprint prompt before it logs in.
+/// Everything from accepting a connection to a successful login, including
+/// every attempt. The client may be showing a fingerprint prompt meanwhile.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_ATTEMPTS_PER_CONNECTION: u32 = 5;
+/// Connections that have not logged in yet, in total and per address.
+const MAX_PENDING: usize = 64;
+const MAX_PENDING_PER_ADDRESS: usize = 8;
+/// Largest message a peer may send before it has logged in; `Hello` and
+/// `Login` are tiny.
+const PRE_LOGIN_MESSAGE_LIMIT: usize = 64 * 1024;
 /// How long the person at the host has to allow a connection.
 pub const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -151,6 +158,50 @@ struct Shared {
     next_id: AtomicU64,
     /// Connection tasks by session id, for `Host::disconnect`.
     connections: Mutex<HashMap<u64, AbortHandle>>,
+    /// Connections still before login, by address.
+    pending: Mutex<HashMap<IpAddr, usize>>,
+    /// Open sessions, for `Host::sessions`.
+    sessions: Mutex<HashMap<u64, SessionInfo>>,
+}
+
+/// One connection's place among those that have not logged in yet.
+struct PendingSlot {
+    shared: Arc<Shared>,
+    ip: IpAddr,
+}
+
+impl PendingSlot {
+    fn take(shared: &Arc<Shared>, ip: IpAddr) -> Option<Self> {
+        let mut pending = shared.pending.lock().unwrap();
+        let total: usize = pending.values().sum();
+        if total >= MAX_PENDING || pending.get(&ip).copied().unwrap_or(0) >= MAX_PENDING_PER_ADDRESS {
+            return None;
+        }
+        *pending.entry(ip).or_default() += 1;
+        Some(Self { shared: shared.clone(), ip })
+    }
+}
+
+impl Drop for PendingSlot {
+    fn drop(&mut self) {
+        let mut pending = self.shared.pending.lock().unwrap();
+        if let Some(n) = pending.get_mut(&self.ip) {
+            *n -= 1;
+            if *n == 0 {
+                pending.remove(&self.ip);
+            }
+        }
+    }
+}
+
+/// Closes the connection when the session task ends or is aborted, even if
+/// a service thread still holds a sender.
+struct CloseOnDrop(Sender);
+
+impl Drop for CloseOnDrop {
+    fn drop(&mut self) {
+        self.0.close();
+    }
 }
 
 /// A running host. Dropping it stops listening and ends all sessions.
@@ -200,6 +251,8 @@ impl Host {
             shutdown,
             next_id: AtomicU64::new(1),
             connections: Mutex::default(),
+            pending: Mutex::default(),
+            sessions: Mutex::default(),
         });
         let tasks = listeners.into_iter().map(|listener| tokio::spawn(accept_loop(listener, shared.clone()))).collect();
         let _ = events.send(HostEvent::Listening(addrs.clone()));
@@ -244,11 +297,20 @@ impl Host {
         }
     }
 
+    /// Sessions open right now; lets a listener that fell behind on
+    /// [`subscribe`](Self::subscribe) catch up.
+    pub fn sessions(&self) -> Vec<SessionInfo> {
+        let mut sessions: Vec<_> = self.shared.sessions.lock().unwrap().values().cloned().collect();
+        sessions.sort_by_key(|s| s.id);
+        sessions
+    }
+
     /// Ends a session; the client sees the connection close.
     pub fn disconnect(&self, id: u64) -> bool {
         match self.shared.connections.lock().unwrap().remove(&id) {
             Some(handle) => {
                 handle.abort();
+                self.shared.sessions.lock().unwrap().remove(&id);
                 let _ = self.shared.events.send(HostEvent::SessionClosed { id, reason: "disconnected by host".into() });
                 true
             }
@@ -313,6 +375,10 @@ async fn accept_loop(listener: TcpListener, shared: Arc<Shared>) {
             let _ = shared.events.send(HostEvent::Refused { peer });
             continue;
         }
+        let Some(slot) = PendingSlot::take(&shared, peer.ip()) else {
+            tracing::debug!("refused {peer}: too many connections waiting to log in");
+            continue;
+        };
         let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
         let task_shared = shared.clone();
         // Hold the lock across spawn so the task cannot look itself up
@@ -320,9 +386,10 @@ async fn accept_loop(listener: TcpListener, shared: Arc<Shared>) {
         let mut connections = shared.connections.lock().unwrap();
         let task = tokio::spawn(async move {
             let shared = task_shared;
-            let result = serve(stream, peer, id, &shared).await;
+            let result = serve(stream, peer, id, slot, &shared).await;
             // Gone from the map means `disconnect` already reported it.
             let known = shared.connections.lock().unwrap().remove(&id).is_some();
+            shared.sessions.lock().unwrap().remove(&id);
             let reason = match result {
                 Ok(Some(reason)) => reason,
                 Ok(None) => return,
@@ -338,7 +405,14 @@ async fn accept_loop(listener: TcpListener, shared: Arc<Shared>) {
 }
 
 /// Returns `Ok(None)` when the connection never became a session.
-async fn serve(stream: TcpStream, peer: SocketAddr, id: u64, shared: &Shared) -> Result<Option<String>, String> {
+async fn serve(
+    stream: TcpStream,
+    peer: SocketAddr,
+    id: u64,
+    slot: PendingSlot,
+    shared: &Shared,
+) -> Result<Option<String>, String> {
+    let deadline = tokio::time::Instant::now() + LOGIN_TIMEOUT;
     let conn = match okno_net::accept(stream, &shared.identity).await {
         Ok(c) => c,
         Err(e) => {
@@ -348,6 +422,8 @@ async fn serve(stream: TcpStream, peer: SocketAddr, id: u64, shared: &Shared) ->
     };
     let fingerprint = conn.remote_fingerprint();
     let (sender, mut receiver) = conn.into_parts();
+    let _close = CloseOnDrop(sender.clone());
+    receiver.set_message_limit(PRE_LOGIN_MESSAGE_LIMIT);
 
     let hello = match tokio::time::timeout(HELLO_TIMEOUT, receiver.recv()).await {
         Ok(Ok(Msg::Hello(h))) => h,
@@ -359,31 +435,41 @@ async fn serve(stream: TcpStream, peer: SocketAddr, id: u64, shared: &Shared) ->
             .await;
         return Ok(None);
     }
-    sender
-        .send(Msg::Hello(Hello {
-            version: PROTOCOL_VERSION,
-            device_name: shared.settings.device_name.clone(),
-            os: crate::os_name().into(),
-            capabilities: shared.settings.services.clone(),
-        }))
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let Some(username) = login(&sender, &mut receiver, peer, (fingerprint, &hello.device_name), shared).await? else {
+    let hello_reply = Msg::Hello(Hello {
+        version: PROTOCOL_VERSION,
+        device_name: shared.settings.device_name.clone(),
+        os: crate::os_name().into(),
+        capabilities: shared.settings.services.clone(),
+    });
+    if sender.send(hello_reply).await.is_err() {
         return Ok(None);
-    };
+    }
 
-    sender
-        .send(Msg::HostInfo(HostInfo {
-            displays: shared.handler.displays(),
-            mac_addresses: local_mac_addresses(),
-            services: shared.settings.services.clone(),
-        }))
-        .await
-        .map_err(|e| e.to_string())?;
+    // Until here nothing was reported, so failures just end the connection.
+    let login = login(&sender, &mut receiver, peer, (fingerprint, &hello.device_name), deadline, shared);
+    let username = match login.await {
+        Ok(Some(username)) => username,
+        Ok(None) => return Ok(None),
+        Err(e) => {
+            tracing::debug!("login from {peer} ended: {e}");
+            return Ok(None);
+        }
+    };
+    drop(slot);
+    receiver.set_message_limit(usize::MAX);
+
+    let host_info = Msg::HostInfo(HostInfo {
+        displays: shared.handler.displays(),
+        mac_addresses: local_mac_addresses(),
+        services: shared.settings.services.clone(),
+    });
+    if sender.send(host_info).await.is_err() {
+        return Ok(None);
+    }
 
     let info = SessionInfo { id, peer, fingerprint, device_name: hello.device_name, username };
     tracing::info!("session {id} opened from {peer} ({})", info.device_name);
+    shared.sessions.lock().unwrap().insert(id, info.clone());
     let _ = shared.events.send(HostEvent::SessionOpened(info.clone()));
     let session = HostSession { info, sender, receiver, shutdown: shared.shutdown.clone() };
     Ok(Some(match shared.handler.run(session).await {
@@ -399,26 +485,32 @@ async fn login(
     receiver: &mut Receiver,
     peer: SocketAddr,
     (fingerprint, device_name): (Fingerprint, &str),
+    deadline: tokio::time::Instant,
     shared: &Shared,
 ) -> Result<Option<String>, String> {
     let reply = |status: LoginStatus, retry: Duration| {
         Msg::LoginResult(LoginResult { status: status as i32, retry_after_ms: retry.as_millis() as u64 })
     };
     for _ in 0..MAX_ATTEMPTS_PER_CONNECTION {
-        let login = match tokio::time::timeout(LOGIN_TIMEOUT, receiver.recv()).await {
+        let login = match tokio::time::timeout_at(deadline, receiver.recv()).await {
             Ok(Ok(Msg::Login(l))) => l,
             Ok(Ok(Msg::Close(_))) | Ok(Err(_)) | Err(_) => return Ok(None),
             Ok(Ok(_)) => return Err("unexpected message before login".into()),
         };
         let password = Zeroizing::new(login.password);
 
-        let status = if let ThrottleDecision::RetryAfter(wait) = shared.throttle.check(peer.ip(), Instant::now()) {
-            sender.send(reply(LoginStatus::Throttled, wait)).await.map_err(|e| e.to_string())?;
-            LoginStatus::Throttled
-        } else if let Some(_permit) = shared.throttle.try_begin() {
+        let status = if let Some(permit) = shared.throttle.try_begin() {
+            if let ThrottleDecision::RetryAfter(wait) = shared.throttle.attempt(peer.ip(), Instant::now()) {
+                sender.send(reply(LoginStatus::Throttled, wait)).await.map_err(|e| e.to_string())?;
+                tracing::info!("login from {peer} rejected: {:?}", LoginStatus::Throttled);
+                let _ = shared.events.send(HostEvent::LoginFailed { peer, status: LoginStatus::Throttled });
+                continue;
+            }
             let creds = shared.credentials.read().unwrap().clone();
             let username = login.username.clone();
             let ok = tokio::task::spawn_blocking(move || creds.verify(&username, password)).await.unwrap_or(false);
+            // Waiting for the host user below must not block other logins.
+            drop(permit);
             if ok {
                 shared.throttle.record_success(peer.ip());
                 let approver = shared.approver.read().unwrap().clone();
@@ -440,7 +532,7 @@ async fn login(
                 sender.send(reply(LoginStatus::Ok, Duration::ZERO)).await.map_err(|e| e.to_string())?;
                 return Ok(Some(login.username));
             }
-            let wait = shared.throttle.record_failure(peer.ip(), Instant::now());
+            let wait = shared.throttle.retry_after(peer.ip(), Instant::now());
             sender.send(reply(LoginStatus::BadCredentials, wait)).await.map_err(|e| e.to_string())?;
             LoginStatus::BadCredentials
         } else {

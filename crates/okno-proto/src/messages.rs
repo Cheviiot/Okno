@@ -310,7 +310,7 @@ pub struct AudioPacket {
 pub struct FileMsg {
     #[prost(uint64, tag = "1")]
     pub id: u64,
-    #[prost(oneof = "file_msg::Op", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10")]
+    #[prost(oneof = "file_msg::Op", tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
     pub op: ::core::option::Option<file_msg::Op>,
 }
 
@@ -340,6 +340,10 @@ pub mod file_msg {
         /// Receiver acknowledges `Upload` and states where to resume.
         #[prost(uint64, tag = "10")]
         Accept(u64),
+        /// The downloading side has written this many bytes; the sender
+        /// keeps at most a window ahead of it.
+        #[prost(uint64, tag = "11")]
+        Ack(u64),
     }
 }
 
@@ -428,7 +432,7 @@ pub struct TerminalSize {
 pub struct TunnelMsg {
     #[prost(uint32, tag = "1")]
     pub id: u32,
-    #[prost(oneof = "tunnel_msg::Op", tags = "2, 3, 4, 5")]
+    #[prost(oneof = "tunnel_msg::Op", tags = "2, 3, 4, 5, 6")]
     pub op: ::core::option::Option<tunnel_msg::Op>,
 }
 
@@ -442,8 +446,14 @@ pub mod tunnel_msg {
         Opened(bool),
         #[prost(bytes = "vec", tag = "4")]
         Data(::prost::alloc::vec::Vec<u8>),
+        /// `true`: the sender will send no more data (half-close);
+        /// `false`: the tunnel is aborted in both directions.
         #[prost(bool, tag = "5")]
         Closed(bool),
+        /// The receiver wrote this many bytes out; the sender may send as
+        /// many more.
+        #[prost(uint32, tag = "6")]
+        Ack(u32),
     }
 }
 

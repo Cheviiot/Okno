@@ -58,6 +58,9 @@ pub struct Pending {
     pub trust: TrustDecision,
     conn: Connection,
     host_info: Option<HostInfo>,
+    /// A reply timed out part-way through a record, so the stream can no
+    /// longer be read; the connection is closed.
+    broken: bool,
 }
 
 /// A logged-in session.
@@ -101,6 +104,7 @@ pub async fn open(
         fingerprint,
         conn,
         host_info: None,
+        broken: false,
     })
 }
 
@@ -140,11 +144,14 @@ impl Pending {
     /// Sends credentials. On `BadCredentials`, `Throttled` or `Busy` the same
     /// connection can be used for another attempt.
     pub async fn login(&mut self, username: &str, password: &str) -> Result<(), ClientError> {
+        if self.broken {
+            return Err(ClientError::Timeout);
+        }
         self.conn
             .sender()
             .send(Msg::Login(Login { username: username.to_owned(), password: password.to_owned() }))
             .await?;
-        let result = match recv_within(self.conn.receiver(), LOGIN_REPLY_TIMEOUT).await? {
+        let result = match self.reply(LOGIN_REPLY_TIMEOUT).await? {
             Msg::LoginResult(r) => r,
             _ => return Err(ClientError::Protocol),
         };
@@ -158,11 +165,20 @@ impl Pending {
             LoginStatus::Denied => return Err(ClientError::Denied),
             LoginStatus::Unspecified => return Err(ClientError::Protocol),
         }
-        match recv(self.conn.receiver()).await? {
+        match self.reply(REPLY_TIMEOUT).await? {
             Msg::HostInfo(info) => self.host_info = Some(info),
             _ => return Err(ClientError::Protocol),
         }
         Ok(())
+    }
+
+    async fn reply(&mut self, timeout: Duration) -> Result<Msg, ClientError> {
+        let reply = recv_within(self.conn.receiver(), timeout).await;
+        if matches!(reply, Err(ClientError::Timeout)) {
+            self.broken = true;
+            self.conn.sender().close();
+        }
+        reply
     }
 
     pub fn is_logged_in(&self) -> bool {
@@ -186,16 +202,21 @@ impl Pending {
 
 impl Session {
     /// Round-trip time of one ping. Only valid while nothing else reads the
-    /// receiver.
+    /// receiver. After a timeout the session is unusable (a record may have
+    /// been cut in half) and is closed.
     pub async fn ping(&mut self) -> Result<Duration, ClientError> {
         let nonce = rand::random();
         let start = Instant::now();
         self.sender.send(Msg::Ping(Ping { nonce })).await?;
         loop {
-            if let Msg::Pong(p) = recv(&mut self.receiver).await? {
-                if p.nonce == nonce {
-                    return Ok(start.elapsed());
-                }
+            let reply = recv(&mut self.receiver).await;
+            if matches!(reply, Err(ClientError::Timeout)) {
+                self.sender.close();
+            }
+            if let Msg::Pong(p) = reply?
+                && p.nonce == nonce
+            {
+                return Ok(start.elapsed());
             }
         }
     }

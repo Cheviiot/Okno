@@ -265,17 +265,11 @@ fn download_dir() -> PathBuf {
 }
 
 /// `dir/name`, or `dir/stem (2).ext` … when taken.
+/// A free path for a host file in `dir`. The name comes from the host, so
+/// it is cleaned first: on Windows `C:x.dll` would otherwise leave `dir`.
 fn free_local_path(dir: &Path, name: &str) -> PathBuf {
-    let name = name.rsplit(['/', '\\']).next().unwrap_or("file");
-    let candidate = dir.join(name);
-    if !candidate.exists() {
-        return candidate;
-    }
-    let (stem, ext) = match name.rsplit_once('.') {
-        Some((s, e)) if !s.is_empty() => (s.to_owned(), format!(".{e}")),
-        _ => (name.to_owned(), String::new()),
-    };
-    (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).expect("some free name")
+    let name = okno_core::files::safe_file_name(name).unwrap_or_else(|| "file".into());
+    okno_core::files::free_path(dir, &name)
 }
 
 #[cfg(test)]
@@ -287,5 +281,13 @@ mod tests {
         assert_eq!(split_size(999), ("999".into(), 0));
         assert_eq!(split_size(1500).1, 1);
         assert_eq!(split_size(25_000_000), ("25".into(), 2));
+    }
+
+    #[test]
+    fn host_names_stay_in_the_download_dir() {
+        let dir = Path::new("/tmp/okno-downloads");
+        for name in ["C:version.dll", "..", "../../.bashrc", "a\\..\\b", "CON", "x.txt:ads"] {
+            assert_eq!(free_local_path(dir, name).parent(), Some(dir), "{name}");
+        }
     }
 }

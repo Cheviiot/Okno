@@ -36,9 +36,14 @@ fn pty_size(size: &TerminalSize) -> PtySize {
     }
 }
 
+/// Keystroke messages waiting for a shell that does not read its input.
+const INPUT_QUEUE: usize = 256;
+
 struct Term {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// To the thread writing into the PTY; a write blocks while the shell
+    /// is not reading, which must not stall the session.
+    input: std::sync::mpsc::SyncSender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
 }
 
@@ -57,6 +62,10 @@ impl TerminalService {
         let id = request.id;
         match request.op {
             Some(Op::Open(size)) => {
+                if self.terms.contains_key(&id) {
+                    tracing::debug!("terminal {id}: id already in use");
+                    return;
+                }
                 if let Err(e) = self.open(id, &size) {
                     tracing::warn!("terminal failed to start: {e}");
                     let _ = self.sender.send(msg(id, Op::Data(format!("okno: {e}\r\n").into_bytes()))).await;
@@ -64,8 +73,10 @@ impl TerminalService {
                 }
             }
             Some(Op::Data(bytes)) => {
-                if let Some(term) = self.terms.get_mut(&id) {
-                    let _ = term.writer.write_all(&bytes).and_then(|_| term.writer.flush());
+                if let Some(term) = self.terms.get(&id)
+                    && term.input.try_send(bytes).is_err()
+                {
+                    tracing::warn!("terminal {id}: shell is not reading, input dropped");
                 }
             }
             Some(Op::Resize(size)) => {
@@ -94,8 +105,17 @@ impl TerminalService {
         let mut child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);
         let mut reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
+        let mut writer = pair.master.take_writer()?;
         let killer = child.clone_killer();
+
+        let (input, keys) = std::sync::mpsc::sync_channel::<Vec<u8>>(INPUT_QUEUE);
+        std::thread::Builder::new().name("okno-pty-in".into()).spawn(move || {
+            for bytes in keys {
+                if writer.write_all(&bytes).and_then(|_| writer.flush()).is_err() {
+                    break;
+                }
+            }
+        })?;
 
         // PTY reads block, so a thread pumps output into the async sender;
         // the same thread reports the exit code once output ends.
@@ -116,7 +136,7 @@ impl TerminalService {
             let code = child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1);
             let _ = rt.block_on(sender.send(msg(id, Op::Exit(code))));
         })?;
-        self.terms.insert(id, Term { master: pair.master, writer, killer });
+        self.terms.insert(id, Term { master: pair.master, input, killer });
         Ok(())
     }
 }

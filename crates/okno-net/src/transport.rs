@@ -6,7 +6,7 @@ use snow::StatelessTransportState;
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::{Error, FLAG_FIN, Fingerprint, MAX_FRAGMENT, MAX_RECORD, Result, read_record, write_record};
 
@@ -36,13 +36,15 @@ impl Connection {
         }
         let queues: [mpsc::Receiver<Vec<u8>>; Channel::COUNT] = rxs.try_into().unwrap();
         let writer_transport = transport.clone();
+        let (close, closed) = watch::channel(false);
         tokio::spawn(async move {
-            if let Err(e) = write_loop(BufWriter::with_capacity(MAX_RECORD * 2, wr), writer_transport, queues).await {
+            let wr = BufWriter::with_capacity(MAX_RECORD * 2, wr);
+            if let Err(e) = write_loop(wr, writer_transport, queues, closed).await {
                 tracing::debug!("writer stopped: {e}");
             }
         });
         Self {
-            sender: Sender { queues: Arc::new(txs.try_into().unwrap()) },
+            sender: Sender { queues: Arc::new(txs.try_into().unwrap()), close: Arc::new(close) },
             receiver: Receiver {
                 rd: BufReader::with_capacity(MAX_RECORD * 2, rd),
                 transport,
@@ -50,6 +52,8 @@ impl Connection {
                 record: vec![0; MAX_RECORD],
                 plain: vec![0; MAX_RECORD],
                 partial: Default::default(),
+                buffered: 0,
+                limit: MAX_MESSAGE_LEN,
             },
             remote_key,
             peer_addr,
@@ -91,10 +95,12 @@ pub enum TrySendError {
 }
 
 /// Sending half; cheap to clone. The connection's write side closes once
-/// every clone is dropped and queued messages are flushed.
+/// every clone is dropped and queued messages are flushed, or on
+/// [`Sender::close`].
 #[derive(Clone)]
 pub struct Sender {
     queues: Arc<[mpsc::Sender<Vec<u8>>; Channel::COUNT]>,
+    close: Arc<watch::Sender<bool>>,
 }
 
 impl Sender {
@@ -122,6 +128,13 @@ impl Sender {
     pub fn is_closed(&self) -> bool {
         self.queues[0].is_closed()
     }
+
+    /// Shuts the connection down even while other clones live (a thread
+    /// stuck on a blocking read may hold one): what is queued now is still
+    /// written, briefly, then the socket closes and later sends fail.
+    pub fn close(&self) {
+        self.close.send_replace(true);
+    }
 }
 
 /// Receiving half.
@@ -132,9 +145,19 @@ pub struct Receiver {
     record: Vec<u8>,
     plain: Vec<u8>,
     partial: [Vec<u8>; Channel::COUNT],
+    /// Bytes held in `partial` across all channels.
+    buffered: usize,
+    limit: usize,
 }
 
 impl Receiver {
+    /// Caps the bytes an unfinished message may hold (all channels
+    /// together), at most [`MAX_MESSAGE_LEN`]. A host keeps it small until
+    /// the peer has logged in, so strangers cannot make it buffer much.
+    pub fn set_message_limit(&mut self, limit: usize) {
+        self.limit = limit.min(MAX_MESSAGE_LEN);
+    }
+
     /// Next complete message. Returns [`Error::Closed`] after the peer shut
     /// the connection down.
     pub async fn recv(&mut self) -> Result<Msg> {
@@ -147,13 +170,15 @@ impl Receiver {
             }
             let channel = Channel::from_u8(self.plain[0]).ok_or(Error::Protocol("unknown channel"))? as usize;
             let fin = self.plain[1] & FLAG_FIN != 0;
-            let part = &mut self.partial[channel];
-            if part.len() + (n - 2) > MAX_MESSAGE_LEN {
+            if self.buffered + (n - 2) > self.limit {
                 return Err(Error::Protocol("message too large"));
             }
+            let part = &mut self.partial[channel];
             part.extend_from_slice(&self.plain[2..n]);
+            self.buffered += n - 2;
             if fin {
                 let data = std::mem::take(part);
+                self.buffered -= data.len();
                 return Ok(Envelope::decode_msg(&data)?);
             }
         }
@@ -164,7 +189,11 @@ async fn write_loop(
     mut wr: BufWriter<OwnedWriteHalf>,
     transport: Arc<StatelessTransportState>,
     mut queues: [mpsc::Receiver<Vec<u8>>; Channel::COUNT],
+    mut closed: watch::Receiver<bool>,
 ) -> Result<()> {
+    /// How long a closing connection may spend writing what was queued.
+    const LINGER: std::time::Duration = std::time::Duration::from_secs(1);
+    let mut closing: Option<tokio::time::Instant> = None;
     let mut pending: [Option<(Vec<u8>, usize)>; Channel::COUNT] = Default::default();
     let mut open = [true; Channel::COUNT];
     let mut nonce = 0u64;
@@ -172,6 +201,9 @@ async fn write_loop(
     let mut out = vec![0u8; MAX_RECORD];
 
     loop {
+        if closing.is_none() && *closed.borrow() {
+            closing = Some(tokio::time::Instant::now() + LINGER);
+        }
         for (i, queue) in queues.iter_mut().enumerate() {
             if pending[i].is_none() && open[i] {
                 match queue.try_recv() {
@@ -184,13 +216,14 @@ async fn write_loop(
 
         let Some(channel) = pending.iter().position(Option::is_some) else {
             wr.flush().await?;
-            if !open.contains(&true) {
+            if !open.contains(&true) || closing.is_some() {
                 wr.shutdown().await?;
                 return Ok(());
             }
             let [q0, q1, q2, q3, q4] = &mut queues;
             let (i, msg) = tokio::select! {
                 biased;
+                _ = closed.changed() => continue,
                 m = q0.recv(), if open[0] => (0, m),
                 m = q1.recv(), if open[1] => (1, m),
                 m = q2.recv(), if open[2] => (2, m),
@@ -204,6 +237,10 @@ async fn write_loop(
             continue;
         };
 
+        if closing.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            let _ = tokio::time::timeout(LINGER, wr.shutdown()).await;
+            return Ok(());
+        }
         let (msg, offset) = pending[channel].as_mut().unwrap();
         let end = (*offset + MAX_FRAGMENT).min(msg.len());
         let fin = end == msg.len();

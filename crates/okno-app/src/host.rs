@@ -10,6 +10,7 @@ use okno_core::host::{ApprovalRequest, Approver, Host, HostEvent, HostSettings, 
 use okno_desktop::{DesktopError, OpenOptions};
 use okno_net::Identity;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use tokio::sync::broadcast;
 
 use crate::app::App;
 use crate::{Messages, SessionRow};
@@ -342,32 +343,53 @@ fn start(app: &Rc<App>) {
         drop(app);
 
         // Follow host events until it stops.
-        while let Ok(event) = events.recv().await {
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => Some(event),
+                // A flood of refused connections can push session events
+                // out of the queue; catch up from the host's own list.
+                Err(broadcast::error::RecvError::Lagged(missed)) => {
+                    tracing::warn!("missed {missed} host events");
+                    None
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            };
             let Some(app) = weak.upgrade() else { return };
             if app.host.generation.get() != generation {
                 return;
             }
             match event {
-                HostEvent::SessionOpened(info) => {
-                    // Whoever sits at this computer must know it is being
-                    // controlled.
-                    let m = messages(&app);
-                    crate::notify::show(
-                        &app.rt,
-                        &format!("okno-session-{}", info.id),
-                        m.invoke_connected_title(info.device_name.as_str().into()).into(),
-                        m.invoke_connected_body(info.peer.ip().to_string().into(), info.username.as_str().into())
-                            .into(),
-                    );
+                Some(HostEvent::SessionOpened(info)) => {
+                    notify_connected(&app, &info);
                     app.host.sessions.borrow_mut().push(info);
                 }
-                HostEvent::SessionClosed { id, .. } => app.host.sessions.borrow_mut().retain(|s| s.id != id),
-                _ => {}
+                Some(HostEvent::SessionClosed { id, .. }) => app.host.sessions.borrow_mut().retain(|s| s.id != id),
+                Some(_) => {}
+                None => {
+                    let Some(current) = app.host.running.borrow().as_ref().map(|h| h.sessions()) else { continue };
+                    for info in &current {
+                        if !app.host.sessions.borrow().iter().any(|s| s.id == info.id) {
+                            notify_connected(&app, info);
+                        }
+                    }
+                    *app.host.sessions.borrow_mut() = current;
+                }
             }
             show_status(&app);
         }
     })
     .expect("event loop running");
+}
+
+/// Whoever sits at this computer must know it is being controlled.
+fn notify_connected(app: &App, info: &SessionInfo) {
+    let m = messages(app);
+    crate::notify::show(
+        &app.rt,
+        &format!("okno-session-{}", info.id),
+        m.invoke_connected_title(info.device_name.as_str().into()).into(),
+        m.invoke_connected_body(info.peer.ip().to_string().into(), info.username.as_str().into()).into(),
+    );
 }
 
 fn failed(app: &App, error: DesktopError) {
