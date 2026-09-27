@@ -106,6 +106,37 @@ async fn port_forwarding_carries_data_both_ways() {
     assert_eq!(n, 0);
 }
 
+/// Output larger than the window arrives whole while the reader is slow.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn terminal_output_is_flow_controlled() {
+    let (_host, remote) = session().await;
+    let (terminal, mut events) = remote.terminals().open(80, 24);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut output = String::new();
+    while !(output.trim_end().ends_with('$') || output.trim_end().ends_with('#') || output.trim_end().ends_with('>')) {
+        match tokio::time::timeout_at(deadline, events.recv()).await.expect("prompt in time") {
+            Some(TerminalEvent::Output(bytes)) => output.push_str(&String::from_utf8_lossy(&bytes)),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    let size = 2 * okno_core::terminal::WINDOW + 999;
+    terminal.input(format!("head -c {size} /dev/zero | tr '\\0' x; exit\r").into_bytes());
+    let mut xs = 0;
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await.expect("output in time") {
+            Some(TerminalEvent::Output(bytes)) => {
+                xs += bytes.iter().filter(|&&b| b == b'x').count();
+                tokio::time::sleep(Duration::from_micros(200)).await;
+            }
+            Some(TerminalEvent::Exited(_)) => break,
+            None => panic!("route closed after {xs} bytes"),
+        }
+    }
+    // The echoed command line contains one more 'x'.
+    assert!(xs >= size, "{xs} < {size}");
+}
+
 /// More than the flow-control window one way, then a half-close: the reply
 /// written after EOF must still arrive.
 #[tokio::test(flavor = "multi_thread")]

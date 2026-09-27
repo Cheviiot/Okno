@@ -11,7 +11,7 @@ use prost::Message as _;
 
 /// Protocol version carried in [`Hello`]. Peers with a different version refuse
 /// the session instead of negotiating.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Default TCP port of a host.
 pub const DEFAULT_PORT: u16 = 21200;

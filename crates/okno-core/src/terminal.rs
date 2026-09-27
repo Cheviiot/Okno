@@ -5,12 +5,16 @@
 //! C Data               → written to the PTY (keystrokes)
 //! C Resize{cols, rows}
 //! C Exit               → the shell is killed
+//! C Ack(n)             n output bytes consumed
 //! H Exit(code)         when the shell ends
 //! ```
+//!
+//! The host keeps at most [`WINDOW`] output bytes unacknowledged, so a
+//! flood of output waits for the client instead of filling its memory.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use okno_net::Sender;
@@ -19,9 +23,12 @@ use okno_proto::terminal_msg::Op;
 use okno_proto::{TerminalMsg, TerminalSize};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tokio::runtime::Handle;
-use tokio::sync::mpsc;
+use tokio::sync::{Semaphore, mpsc};
 
 pub const SERVICE_TERMINAL: &str = "terminal";
+
+/// Output bytes the host may send ahead of the client's acknowledgements.
+pub const WINDOW: usize = 1024 * 1024;
 
 fn msg(id: u32, op: Op) -> Msg {
     Msg::Terminal(TerminalMsg { id, op: Some(op) })
@@ -45,6 +52,15 @@ struct Term {
     /// is not reading, which must not stall the session.
     input: std::sync::mpsc::SyncSender<Vec<u8>>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// Output bytes the reader thread may still send.
+    credit: Arc<Semaphore>,
+}
+
+impl Drop for Term {
+    fn drop(&mut self) {
+        // Wakes the reader thread if it waits for credit.
+        self.credit.close();
+    }
 }
 
 /// Terminals of one host session.
@@ -84,6 +100,12 @@ impl TerminalService {
                     let _ = term.master.resize(pty_size(&size));
                 }
             }
+            Some(Op::Ack(n)) => {
+                if let Some(term) = self.terms.get(&id) {
+                    let room = WINDOW.saturating_sub(term.credit.available_permits());
+                    term.credit.add_permits((n as usize).min(room));
+                }
+            }
             Some(Op::Exit(_)) => {
                 if let Some(mut term) = self.terms.remove(&id) {
                     let _ = term.killer.kill();
@@ -121,12 +143,18 @@ impl TerminalService {
         // the same thread reports the exit code once output ends.
         let sender = self.sender.clone();
         let rt = Handle::current();
+        let credit = Arc::new(Semaphore::new(WINDOW));
+        let output_credit = credit.clone();
         std::thread::Builder::new().name("okno-pty".into()).spawn(move || {
             let mut buf = [0u8; 16 * 1024];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
+                        match rt.block_on(output_credit.acquire_many(n as u32)) {
+                            Ok(permit) => permit.forget(),
+                            Err(_) => break,
+                        }
                         if rt.block_on(sender.send(msg(id, Op::Data(buf[..n].to_vec())))).is_err() {
                             break;
                         }
@@ -136,7 +164,7 @@ impl TerminalService {
             let code = child.wait().map(|s| s.exit_code() as i32).unwrap_or(-1);
             let _ = rt.block_on(sender.send(msg(id, Op::Exit(code))));
         })?;
-        self.terms.insert(id, Term { master: pair.master, input, killer });
+        self.terms.insert(id, Term { master: pair.master, input, killer, credit });
         Ok(())
     }
 }
@@ -157,7 +185,13 @@ pub enum TerminalEvent {
     Exited(i32),
 }
 
-type Routes = Arc<Mutex<HashMap<u32, mpsc::UnboundedSender<TerminalEvent>>>>;
+struct Route {
+    events: mpsc::UnboundedSender<TerminalEvent>,
+    /// Output bytes delivered and not yet consumed.
+    queued: Arc<AtomicUsize>,
+}
+
+type Routes = Arc<Mutex<HashMap<u32, Route>>>;
 
 /// Client side of remote terminals; cheap to clone.
 #[derive(Clone)]
@@ -179,23 +213,52 @@ impl Terminals {
             _ => return,
         };
         let mut routes = self.routes.lock().unwrap();
-        if let Some(route) = routes.get(&reply.id) {
-            let ended = matches!(event, TerminalEvent::Exited(_));
-            let _ = route.send(event);
-            if ended {
-                routes.remove(&reply.id);
-            }
+        let Some(route) = routes.get(&reply.id) else { return };
+        if let TerminalEvent::Output(bytes) = &event
+            && route.queued.fetch_add(bytes.len(), Ordering::Relaxed) + bytes.len() > WINDOW
+        {
+            tracing::warn!("terminal {}: host ignored flow control", reply.id);
+            routes.remove(&reply.id);
+            return;
+        }
+        let ended = matches!(event, TerminalEvent::Exited(_));
+        let _ = route.events.send(event);
+        if ended {
+            routes.remove(&reply.id);
         }
     }
 
     /// Starts a shell on the host.
-    pub fn open(&self, cols: u32, rows: u32) -> (RemoteTerminal, mpsc::UnboundedReceiver<TerminalEvent>) {
+    pub fn open(&self, cols: u32, rows: u32) -> (RemoteTerminal, TerminalEvents) {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
-        let (tx, events) = mpsc::unbounded_channel();
-        self.routes.lock().unwrap().insert(id, tx);
+        let (tx, rx) = mpsc::unbounded_channel();
+        let queued = Arc::new(AtomicUsize::new(0));
+        self.routes.lock().unwrap().insert(id, Route { events: tx, queued: queued.clone() });
         let terminal = RemoteTerminal { id, sender: self.sender.clone(), routes: self.routes.clone() };
         terminal.send(Op::Open(TerminalSize { cols, rows }));
-        (terminal, events)
+        (terminal, TerminalEvents { id, rx, queued, sender: self.sender.clone() })
+    }
+}
+
+/// Output of one remote shell. Reading output acknowledges it, which lets
+/// the host send more.
+pub struct TerminalEvents {
+    id: u32,
+    rx: mpsc::UnboundedReceiver<TerminalEvent>,
+    queued: Arc<AtomicUsize>,
+    sender: Sender,
+}
+
+impl TerminalEvents {
+    /// `None` once the shell has exited and everything was read, or the
+    /// session ended.
+    pub async fn recv(&mut self) -> Option<TerminalEvent> {
+        let event = self.rx.recv().await?;
+        if let TerminalEvent::Output(bytes) = &event {
+            self.queued.fetch_sub(bytes.len(), Ordering::Relaxed);
+            let _ = self.sender.send(msg(self.id, Op::Ack(bytes.len() as u32))).await;
+        }
+        Some(event)
     }
 }
 

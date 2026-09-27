@@ -400,7 +400,7 @@ pub struct FileChunk {
 pub struct TerminalMsg {
     #[prost(uint32, tag = "1")]
     pub id: u32,
-    #[prost(oneof = "terminal_msg::Op", tags = "2, 3, 4, 5")]
+    #[prost(oneof = "terminal_msg::Op", tags = "2, 3, 4, 5, 6")]
     pub op: ::core::option::Option<terminal_msg::Op>,
 }
 
@@ -416,6 +416,10 @@ pub mod terminal_msg {
         /// Exit code, or -1 when unknown.
         #[prost(sint32, tag = "5")]
         Exit(i32),
+        /// The client consumed this many output bytes; the host may send as
+        /// many more.
+        #[prost(uint32, tag = "6")]
+        Ack(u32),
     }
 }
 
