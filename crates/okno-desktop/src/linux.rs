@@ -328,7 +328,7 @@ async fn inject(
             if result.is_ok() && (s.dx != 0.0 || s.dy != 0.0) {
                 result = remote
                     .notify_pointer_axis(
-                        &session,
+                        session,
                         s.dx,
                         s.dy,
                         ashpd::desktop::remote_desktop::NotifyPointerAxisOptions::default().set_finish(true),
