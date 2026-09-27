@@ -45,7 +45,7 @@ pub struct App {
 
 thread_local! {
     /// The app, for callbacks posted to the UI thread from other threads.
-    static APP: RefCell<std::rc::Weak<App>> = RefCell::new(std::rc::Weak::new());
+    static APP: RefCell<std::rc::Weak<App>> = const { RefCell::new(std::rc::Weak::new()) };
 }
 
 impl App {
