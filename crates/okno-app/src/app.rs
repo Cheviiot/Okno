@@ -44,6 +44,8 @@ pub struct App {
     /// Switches the login dialog to "waiting for permission".
     waiting_timer: slint::Timer,
     searching: Cell<bool>,
+    /// Fingerprints seen on the network by the last search.
+    online: RefCell<std::collections::HashSet<String>>,
     look: RefCell<Look>,
     cursor: Cursor,
     clipboard: LocalClipboard,
@@ -108,6 +110,7 @@ impl App {
             discovery_timer: slint::Timer::default(),
             waiting_timer: slint::Timer::default(),
             searching: Cell::new(false),
+            online: RefCell::default(),
             look: RefCell::default(),
             cursor: Cursor::default(),
             clipboard: LocalClipboard::new(),
@@ -211,6 +214,29 @@ impl App {
             }
         });
         let weak = Rc::downgrade(self);
+        w.on_wake(move |fingerprint| {
+            let Some(app) = weak.upgrade() else { return };
+            let Some(device) = app.trust.borrow().devices.get(fingerprint.as_str()).cloned() else { return };
+            let macs: Vec<okno_discovery::MacAddress> = device.macs.iter().filter_map(|m| m.parse().ok()).collect();
+            let task = app.rt.spawn(async move {
+                let mut last = Err(std::io::Error::other("no address"));
+                for mac in macs {
+                    last = okno_discovery::send_magic_packet(mac).await;
+                }
+                last
+            });
+            let weak = Rc::downgrade(&app);
+            let _ = slint::spawn_local(async move {
+                let result = task.await;
+                let Some(app) = weak.upgrade() else { return };
+                match result {
+                    Ok(Ok(_)) => app.toast(app.messages().invoke_wake_sent(device.name.as_str().into()), false),
+                    Ok(Err(e)) => app.toast(app.messages().invoke_wake_failed(e.to_string().into()), true),
+                    Err(e) => app.toast(app.messages().invoke_wake_failed(e.to_string().into()), true),
+                }
+            });
+        });
+        let weak = Rc::downgrade(self);
         w.on_dialog_cancelled(move || {
             if let Some(app) = weak.upgrade() {
                 app.cancel_connection();
@@ -265,6 +291,7 @@ impl App {
                 endpoint: d.endpoints[0].as_str().into(),
                 fingerprint: fp.as_str().into(),
                 known: true,
+                can_wake: !d.macs.is_empty() && !self.online.borrow().contains(fp),
             })
             .collect();
         self.window.set_recent(ModelRc::new(VecModel::from(rows)));
@@ -296,10 +323,14 @@ impl App {
                         endpoint: endpoint.into(),
                         fingerprint: p.fingerprint.to_hex().into(),
                         known: trust.devices.contains_key(&p.fingerprint.to_hex()),
+                        can_wake: false,
                     }
                 })
                 .collect();
             app.window.set_nearby(ModelRc::new(VecModel::from(rows)));
+            drop(trust);
+            *app.online.borrow_mut() = peers.iter().map(|p| p.fingerprint.to_hex()).collect();
+            app.show_recent();
         })
         .expect("event loop running");
     }
@@ -505,6 +536,8 @@ impl App {
         self.window.set_dialog(DialogKind::None);
 
         let session = pending.into_session();
+        self.trust.borrow_mut().set_macs(&session.fingerprint, session.host_info.mac_addresses.clone());
+        self.save_trust();
         let weak = Rc::downgrade(self);
         let opened = SessionView::open(session, &self.look.borrow(), self.clipboard.clone(), move |reason| {
             let Some(app) = weak.upgrade() else { return };

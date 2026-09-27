@@ -11,6 +11,9 @@ pub struct TrustedDevice {
     pub endpoints: Vec<String>,
     /// Unix seconds.
     pub first_seen: i64,
+    /// Hardware addresses the host reported, for Wake-on-LAN.
+    #[serde(default)]
+    pub macs: Vec<String>,
 }
 
 /// Result of comparing a host's key with what the client pinned before.
@@ -63,6 +66,13 @@ impl TrustStore {
             device.name = name.to_owned();
         }
         device.endpoints.push(endpoint);
+    }
+
+    /// Records the host's hardware addresses for Wake-on-LAN.
+    pub fn set_macs(&mut self, fp: &Fingerprint, macs: Vec<String>) {
+        if let Some(device) = self.devices.get_mut(&fp.to_hex()) {
+            device.macs = macs;
+        }
     }
 
     pub fn forget(&mut self, fp: &Fingerprint) -> bool {

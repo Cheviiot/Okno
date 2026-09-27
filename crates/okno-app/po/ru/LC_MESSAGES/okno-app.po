@@ -591,3 +591,12 @@ msgstr "Показать статистику"
 
 msgid "{} fps · {} Mbit/s · {} ms"
 msgstr "{} кадр/с · {} Мбит/с · {} мс"
+
+msgid "Wake Up"
+msgstr "Разбудить"
+
+msgid "Wake-up signal sent to {}"
+msgstr "Сигнал пробуждения отправлен на {}"
+
+msgid "Cannot send the wake-up signal: {}"
+msgstr "Не удалось отправить сигнал пробуждения: {}"

@@ -17,6 +17,7 @@ export struct DeviceRow {
     endpoint: string,
     fingerprint: string,
     known: bool,
+    can-wake: bool,
 }
 
 export struct SessionRow {
@@ -68,6 +69,7 @@ component DevicesPage inherits KPage {
     in-out property <string> address;
     callback connect(string);
     callback forget(string);
+    callback wake(string);
 
     KGroup {
         title: @tr("Connect by Address");
@@ -116,6 +118,11 @@ component DevicesPage inherits KPage {
             activatable: true;
             last: i == recent.length - 1;
             clicked => { root.connect(d.endpoint); }
+            if d.can-wake: KIconButton {
+                icon: Icons.power;
+                tooltip: @tr("Wake Up");
+                clicked => { root.wake(d.fingerprint); }
+            }
             KIconButton {
                 icon: Icons.trash;
                 tooltip: @tr("Forget");
@@ -342,6 +349,7 @@ export component MainWindow inherits KAppWindow {
     callback connect(string);
     callback refresh;
     callback forget(string);
+    callback wake(string);
 
     // Connection dialogs
     in-out property <DialogKind> dialog: DialogKind.none;
@@ -431,6 +439,7 @@ export component MainWindow inherits KAppWindow {
             address <=> root.address;
             connect(e) => { root.connect(e); }
             forget(f) => { root.forget(f); }
+            wake(f) => { root.wake(f); }
         }
         if root.page == 1: HostPage {
             running: root.host-running;
@@ -1275,6 +1284,8 @@ export global Messages {
     pure public function approval-title(device: string) -> string { @tr("{} asks to control this computer", device) }
     pure public function denied() -> string { @tr("The person at that computer declined the connection") }
     pure public function stats(fps: int, mbit: string, rtt: string) -> string { @tr("{} fps · {} Mbit/s · {} ms", fps, mbit, rtt) }
+    pure public function wake-sent(name: string) -> string { @tr("Wake-up signal sent to {}", name) }
+    pure public function wake-failed(e: string) -> string { @tr("Cannot send the wake-up signal: {}", e) }
     pure public function settings-saved() -> string { @tr("Settings saved") }
 
     pure public function size(n: string, unit: int) -> string {
