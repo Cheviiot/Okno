@@ -51,6 +51,12 @@ pub struct SessionView {
     _stats_timer: slint::Timer,
 }
 
+/// How the remote screen fits the window, and where to remember a change.
+pub struct Scaling {
+    pub scale_to_window: bool,
+    pub remember: Box<dyn Fn(bool)>,
+}
+
 impl SessionView {
     /// Opens the window and starts streaming the first display.
     /// `on_closed` runs on the UI thread once, when the session ends.
@@ -58,10 +64,13 @@ impl SessionView {
         session: Session,
         look: &Look,
         clipboard: LocalClipboard,
+        scaling: Scaling,
         on_closed: impl Fn(Option<String>) + 'static,
     ) -> Result<Rc<Self>, slint::PlatformError> {
         let window = SessionWindow::new()?;
         chrome::apply!(window, look);
+        window.set_scale_to_window(scaling.scale_to_window);
+        window.on_scaling_changed(move |on| (scaling.remember)(on));
         let session_name = session.host.device_name.clone();
         let cursor = Cursor::default();
         let messages = window.global::<Messages>();

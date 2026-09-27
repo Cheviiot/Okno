@@ -600,3 +600,6 @@ msgstr "Сигнал пробуждения отправлен на {}"
 
 msgid "Cannot send the wake-up signal: {}"
 msgstr "Не удалось отправить сигнал пробуждения: {}"
+
+msgid "Scale to Window"
+msgstr "Масштабировать по окну"

@@ -19,7 +19,7 @@ use tokio::runtime::Handle;
 use crate::chrome::{self, Cursor, Look};
 use crate::clipboard::LocalClipboard;
 use crate::host::HostState;
-use crate::session::SessionView;
+use crate::session::{Scaling, SessionView};
 use crate::{DeviceRow, DialogKind, MainWindow, Messages};
 
 const DISCOVERY_TIME: Duration = Duration::from_secs(3);
@@ -539,7 +539,18 @@ impl App {
         self.trust.borrow_mut().set_macs(&session.fingerprint, session.host_info.mac_addresses.clone());
         self.save_trust();
         let weak = Rc::downgrade(self);
-        let opened = SessionView::open(session, &self.look.borrow(), self.clipboard.clone(), move |reason| {
+        let remembering = weak.clone();
+        let scaling = Scaling {
+            scale_to_window: self.config.borrow().client.scale_to_window,
+            remember: Box::new(move |on| {
+                if let Some(app) = remembering.upgrade() {
+                    app.config.borrow_mut().client.scale_to_window = on;
+                    app.save_config();
+                }
+            }),
+        };
+        let clipboard = self.clipboard.clone();
+        let opened = SessionView::open(session, &self.look.borrow(), clipboard, scaling, move |reason| {
             let Some(app) = weak.upgrade() else { return };
             app.sessions.borrow_mut().retain(|s| s.is_open());
             let text = match reason {

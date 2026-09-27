@@ -811,6 +811,8 @@ export component SessionWindow inherits KAppWindow {
     in-out property <bool> stats-visible;
     in property <string> stats-text;
     in-out property <int> quality;
+    in-out property <bool> scale-to-window: true;
+    callback scaling-changed(bool);
     callback quality-selected(int);
     in-out property <bool> ports-open;
     in property <[ForwardRow]> forwards;
@@ -857,13 +859,21 @@ export component SessionWindow inherits KAppWindow {
     }
     video := Rectangle {
         background: #000000;
+        clip: true;
         property <float> iw: max(1, root.frame.width);
         property <float> ih: max(1, root.frame.height);
-        property <float> scale: min(self.width / 1px / iw, self.height / 1px / ih);
+        // Pixel for pixel: one frame pixel per physical pixel.
+        property <float> scale: root.scale-to-window ? min(self.width / 1px / iw, self.height / 1px / ih) : 1phx / 1px;
         property <length> dw: iw * scale * 1px;
         property <length> dh: ih * scale * 1px;
-        property <length> ox: (self.width - dw) / 2;
-        property <length> oy: (self.height - dh) / 2;
+        // A frame larger than the window pans with the pointer, so every
+        // edge can be reached without scroll bars stealing input.
+        property <length> ox: dw > self.width
+            ? -(dw - self.width) * clamp(area.mouse-x / self.width, 0, 1)
+            : (self.width - dw) / 2;
+        property <length> oy: dh > self.height
+            ? -(dh - self.height) * clamp(area.mouse-y / self.height, 0, 1)
+            : (self.height - dh) / 2;
 
         Image {
             x: video.ox;
@@ -958,7 +968,7 @@ export component SessionWindow inherits KAppWindow {
     if root.tools-open: Rectangle {
         x: parent.width - self.width - 200px;
         y: 44px;
-        width: 240px;
+        width: max(240px, tools-list.preferred-width);
         height: tools-list.preferred-height;
         background: Theme.popover-bg;
         border-radius: Theme.radius-card;
@@ -995,6 +1005,30 @@ export component SessionWindow inherits KAppWindow {
                     spacing: 12px;
                     KIcon { source: item.icon; }
                     KText { text: item.title; vertical-alignment: center; }
+                }
+            }
+            Rectangle {
+                height: 36px;
+                border-radius: Theme.radius-control;
+                background: scale-area.has-hover ? Theme.control : transparent;
+                accessible-role: checkbox;
+                accessible-checked: root.scale-to-window;
+                accessible-label: @tr("Scale to Window");
+                scale-area := TouchArea {
+                    clicked => {
+                        root.tools-open = false;
+                        root.reveal = false;
+                        root.scale-to-window = !root.scale-to-window;
+                        root.scaling-changed(root.scale-to-window);
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 12px;
+                    KIcon { source: Icons.zoom-fit; }
+                    KText { text: @tr("Scale to Window"); vertical-alignment: center; horizontal-stretch: 1; }
+                    if root.scale-to-window: KIcon { source: Icons.ok; tint: Theme.accent-text; }
                 }
             }
             Rectangle {

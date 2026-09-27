@@ -23,11 +23,20 @@ pub struct Config {
     pub client: ClientConfig,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClientConfig {
     /// Username typed last time, offered in the login dialog.
     pub last_username: String,
+    /// Fit the remote screen into the window; otherwise show it pixel for
+    /// pixel and pan with the pointer.
+    pub scale_to_window: bool,
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self { last_username: String::new(), scale_to_window: true }
+    }
 }
 
 impl Default for Config {
