@@ -799,6 +799,8 @@ export component SessionWindow inherits KAppWindow {
     in property <bool> sound-on;
     callback sound-toggled;
     in-out property <bool> tools-open;
+    in-out property <bool> stats-visible;
+    in property <string> stats-text;
     in-out property <int> quality;
     callback quality-selected(int);
     in-out property <bool> ports-open;
@@ -922,6 +924,24 @@ export component SessionWindow inherits KAppWindow {
         disconnect => { root.disconnect(); }
     }
 
+    // Session statistics, on-screen display style.
+    if root.stats-visible && root.has-frame: Rectangle {
+        x: 12px;
+        y: (root.fullscreen ? 0px : 47px) + 12px;
+        width: stats-label.preferred-width + 24px;
+        height: 32px;
+        border-radius: 16px;
+        background: #000000b3;
+        stats-label := Text {
+            text: root.stats-text;
+            color: #ffffff;
+            font-family: Theme.mono-family;
+            font-size: 12.5px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
     // Tools menu under the header bar button.
     if root.tools-open: TouchArea {
         clicked => { root.tools-open = false; }
@@ -944,6 +964,7 @@ export component SessionWindow inherits KAppWindow {
                 { title: @tr("Files"), icon: Icons.folder },
                 { title: @tr("Terminal"), icon: Icons.terminal },
                 { title: @tr("Port Forwarding"), icon: Icons.ports },
+                { title: root.stats-visible ? @tr("Hide Statistics") : @tr("Show Statistics"), icon: Icons.network },
             ]: Rectangle {
                 height: 36px;
                 border-radius: Theme.radius-control;
@@ -956,7 +977,8 @@ export component SessionWindow inherits KAppWindow {
                         root.reveal = false;
                         if i == 0 { root.files-open = true; root.files-opened(); }
                         else if i == 1 { root.open-terminal(); }
-                        else { root.ports-open = true; }
+                        else if i == 2 { root.ports-open = true; }
+                        else { root.stats-visible = !root.stats-visible; }
                     }
                 }
                 HorizontalLayout {
@@ -1252,6 +1274,7 @@ export global Messages {
     pure public function approval-detail(peer: string, user: string) -> string { @tr("The request comes from {} and logged in as “{}”. Allow only if you expect it.", peer, user) }
     pure public function approval-title(device: string) -> string { @tr("{} asks to control this computer", device) }
     pure public function denied() -> string { @tr("The person at that computer declined the connection") }
+    pure public function stats(fps: int, mbit: string, rtt: string) -> string { @tr("{} fps · {} Mbit/s · {} ms", fps, mbit, rtt) }
     pure public function settings-saved() -> string { @tr("Settings saved") }
 
     pure public function size(n: string, unit: int) -> string {

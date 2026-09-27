@@ -582,3 +582,12 @@ msgstr "На том компьютере подключение отклонил
 
 msgid "Waiting for the person at that computer to allow the connection…"
 msgstr "Ждём, пока на том компьютере разрешат подключение…"
+
+msgid "Hide Statistics"
+msgstr "Скрыть статистику"
+
+msgid "Show Statistics"
+msgstr "Показать статистику"
+
+msgid "{} fps · {} Mbit/s · {} ms"
+msgstr "{} кадр/с · {} Мбит/с · {} мс"

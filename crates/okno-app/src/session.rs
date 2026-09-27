@@ -48,6 +48,7 @@ pub struct SessionView {
     terminals: Rc<RefCell<Vec<Rc<TerminalView>>>>,
     _forwards: Rc<RefCell<Vec<Forward>>>,
     _sound: Rc<RefCell<Option<okno_audio::Playback>>>,
+    _stats_timer: slint::Timer,
 }
 
 impl SessionView {
@@ -472,6 +473,37 @@ impl SessionView {
             });
         }
 
+        // Statistics overlay, refreshed every second while shown.
+        let stats_timer = slint::Timer::default();
+        {
+            let remote = remote.clone();
+            let weak = window.as_weak();
+            let last = Cell::new(okno_core::remote::Stats::default());
+            let last_at = Cell::new(std::time::Instant::now());
+            stats_timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), move || {
+                let Some(w) = weak.upgrade() else { return };
+                let Some(now) = remote.borrow().as_ref().map(|r| r.stats()) else { return };
+                let secs = last_at.replace(std::time::Instant::now()).elapsed().as_secs_f64().max(0.001);
+                let before = last.replace(now);
+                if !w.get_stats_visible() {
+                    return;
+                }
+                let fps = ((now.frames - before.frames) as f64 / secs).round() as i32;
+                let mbit = (now.video_bytes - before.video_bytes) as f64 * 8.0 / secs / 1e6;
+                let mbit = format!("{mbit:.1}");
+                let mbit = if crate::uses_decimal_comma() { mbit.replace('.', ",") } else { mbit };
+                let rtt = now
+                    .rtt
+                    .map(|d| {
+                        let ms = d.as_secs_f64() * 1000.0;
+                        let text = if ms < 10.0 { format!("{ms:.1}") } else { format!("{ms:.0}") };
+                        if crate::uses_decimal_comma() { text.replace('.', ",") } else { text }
+                    })
+                    .unwrap_or_else(|| "—".into());
+                w.set_stats_text(w.global::<Messages>().invoke_stats(fps, mbit.into(), rtt.into()));
+            });
+        }
+
         Ok(Rc::new(Self {
             _window: window,
             remote,
@@ -480,6 +512,7 @@ impl SessionView {
             terminals,
             _forwards: forwards,
             _sound: sound,
+            _stats_timer: stats_timer,
         }))
     }
 
