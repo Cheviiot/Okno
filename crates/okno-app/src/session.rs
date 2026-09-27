@@ -20,7 +20,8 @@ use crate::terminal_ui::TerminalView;
 use crate::{ForwardRow, Messages, SessionWindow, keys};
 use okno_core::tunnel::Forward;
 
-const MAX_FPS: u32 = 30;
+/// Picture presets of the session menu: (frames per second, kbit/s).
+const PRESETS: [(u32, u32); 3] = [(30, 8_000), (30, 20_000), (60, 6_000)];
 
 struct Frame {
     width: u32,
@@ -116,12 +117,18 @@ impl SessionView {
             RemoteEvent::Error(e) => tracing::warn!("host reported: {e}"),
             _ => {}
         }));
-        remote.request_video(primary as u32, MAX_FPS, 0);
+        let quality = Rc::new(Cell::new(0usize));
+        let (fps, kbps) = PRESETS[0];
+        remote.request_video(primary as u32, fps, kbps);
         // Sound: on by default; OKNO_NO_SOUND=1 disables it (tests).
         let sound: Rc<RefCell<Option<okno_audio::Playback>>> = Rc::default();
         let start_sound = {
             let sound = sound.clone();
             move |remote: &Remote| -> bool {
+                // Test runs never touch the real audio devices.
+                if std::env::var_os("OKNO_NO_SOUND").is_some() {
+                    return false;
+                }
                 let ring = Arc::new(okno_audio::SampleRing::default());
                 match okno_audio::play(ring.clone()).and_then(|p| remote.start_audio(ring).map(|_| p)) {
                     Ok(playback) => {
@@ -135,7 +142,7 @@ impl SessionView {
                 }
             }
         };
-        let sound_on = std::env::var_os("OKNO_NO_SOUND").is_none() && start_sound(&remote);
+        let sound_on = start_sound(&remote);
         window.set_sound_on(sound_on);
         let files = crate::files_ui::install(&window, remote.files(), tokio::runtime::Handle::current(), &session_name);
         let terminals: Rc<RefCell<Vec<Rc<TerminalView>>>> = Rc::default();
@@ -223,6 +230,19 @@ impl SessionView {
         {
             let remote = remote.clone();
             let display = display.clone();
+            let quality = quality.clone();
+            window.on_quality_selected(move |i| {
+                quality.set((i as usize).min(PRESETS.len() - 1));
+                if let Some(r) = remote.borrow().as_ref() {
+                    let (fps, kbps) = PRESETS[quality.get()];
+                    r.request_video(display.get(), fps, kbps);
+                }
+            });
+        }
+        {
+            let remote = remote.clone();
+            let display = display.clone();
+            let quality = quality.clone();
             let weak = weak.clone();
             window.on_display_selected(move |i| {
                 display.set(i as u32);
@@ -230,7 +250,8 @@ impl SessionView {
                     w.set_has_frame(false);
                 }
                 if let Some(r) = remote.borrow().as_ref() {
-                    r.request_video(i as u32, MAX_FPS, 0);
+                    let (fps, kbps) = PRESETS[quality.get()];
+                    r.request_video(i as u32, fps, kbps);
                 }
             });
         }

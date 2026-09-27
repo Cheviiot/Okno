@@ -758,6 +758,8 @@ export component SessionWindow inherits KAppWindow {
     in property <bool> sound-on;
     callback sound-toggled;
     in-out property <bool> tools-open;
+    in-out property <int> quality;
+    callback quality-selected(int);
     in-out property <bool> ports-open;
     in property <[ForwardRow]> forwards;
     in-out property <string> forward-local;
@@ -921,6 +923,55 @@ export component SessionWindow inherits KAppWindow {
                     spacing: 12px;
                     KIcon { source: item.icon; }
                     KText { text: item.title; vertical-alignment: center; }
+                }
+            }
+            Rectangle {
+                height: 13px;
+                Rectangle {
+                    y: 6px;
+                    height: 1px;
+                    background: Theme.separator;
+                }
+            }
+            KText {
+                text: @tr("Picture");
+                font-size: Theme.font-small;
+                font-weight: 700;
+                color: Theme.dim-fg;
+                height: 28px;
+                vertical-alignment: center;
+                x: 12px;
+            }
+            for q[i] in [
+                { title: @tr("Balanced"), subtitle: @tr("30 fps, up to 8 Mbit/s") },
+                { title: @tr("Sharp"), subtitle: @tr("30 fps, up to 20 Mbit/s") },
+                { title: @tr("Smooth"), subtitle: @tr("60 fps, up to 6 Mbit/s") },
+            ]: Rectangle {
+                height: 48px;
+                border-radius: Theme.radius-control;
+                background: qarea.has-hover ? Theme.control : transparent;
+                accessible-role: button;
+                accessible-label: q.title;
+                qarea := TouchArea {
+                    clicked => {
+                        root.tools-open = false;
+                        if root.quality != i {
+                            root.quality = i;
+                            root.quality-selected(i);
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        KText { text: q.title; }
+                        KText { text: q.subtitle; color: Theme.dim-fg; font-size: Theme.font-small; }
+                    }
+                    if root.quality == i: KIcon { source: Icons.ok; tint: Theme.accent-text; }
                 }
             }
         }

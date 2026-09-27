@@ -534,3 +534,24 @@ msgstr "Укажите порт от 1 до 65535"
 
 msgid "Remember Password"
 msgstr "Запомнить пароль"
+
+msgid "Picture"
+msgstr "Изображение"
+
+msgid "Balanced"
+msgstr "Сбалансированно"
+
+msgid "30 fps, up to 8 Mbit/s"
+msgstr "30 кадров/с, до 8 Мбит/с"
+
+msgid "Sharp"
+msgstr "Чётко"
+
+msgid "30 fps, up to 20 Mbit/s"
+msgstr "30 кадров/с, до 20 Мбит/с"
+
+msgid "Smooth"
+msgstr "Плавно"
+
+msgid "60 fps, up to 6 Mbit/s"
+msgstr "60 кадров/с, до 6 Мбит/с"

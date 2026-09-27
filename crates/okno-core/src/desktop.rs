@@ -159,6 +159,50 @@ fn start_audio(source: okno_audio::Source, sender: Sender) -> Result<okno_audio:
     })
 }
 
+/// Adapts the encoder bitrate to the link: back off quickly when frames
+/// do not fit in the send queue, recover slowly while everything fits.
+struct RateControl {
+    max: u32,
+    min: u32,
+    current: u32,
+    drops: u32,
+    last_change: Instant,
+    calm_since: Instant,
+}
+
+impl RateControl {
+    const STEP: Duration = Duration::from_secs(3);
+    const CALM: Duration = Duration::from_secs(6);
+
+    fn new(max: u32, now: Instant) -> Self {
+        Self { max, min: (max / 8).max(500), current: max, drops: 0, last_change: now, calm_since: now }
+    }
+
+    fn dropped(&mut self, now: Instant) {
+        self.drops += 1;
+        self.calm_since = now;
+    }
+
+    /// The new bitrate when it should change.
+    fn tick(&mut self, now: Instant) -> Option<u32> {
+        if now.duration_since(self.last_change) < Self::STEP {
+            return None;
+        }
+        let before = self.current;
+        if self.drops >= 2 {
+            self.current = (self.current * 6 / 10).max(self.min);
+        } else if self.drops == 0 && now.duration_since(self.calm_since) >= Self::CALM {
+            self.current = (self.current * 5 / 4).min(self.max);
+        }
+        self.drops = 0;
+        if self.current == before {
+            return None;
+        }
+        self.last_change = now;
+        Some(self.current)
+    }
+}
+
 struct Shared {
     stop: AtomicBool,
     keyframe: AtomicBool,
@@ -197,6 +241,7 @@ impl Streamer {
             let capture = capture;
             let interval = Duration::from_secs(1) / settings.max_fps;
             let epoch = Instant::now();
+            let mut rate = RateControl::new(settings.bitrate_kbps, epoch);
             let mut next = Instant::now();
             while !state.stop.load(Ordering::Relaxed) {
                 let frame = match capture.slot.take(Duration::from_millis(250)) {
@@ -204,6 +249,13 @@ impl Streamer {
                     Taken::Timeout => continue,
                     Taken::Closed => break,
                 };
+                if let Some(kbps) = rate.tick(Instant::now()) {
+                    tracing::debug!("video bitrate now {kbps} kbit/s");
+                    // A new encoder starts with a keyframe.
+                    if let Err(e) = encoder.reconfigure(EncoderSettings { bitrate_kbps: kbps, ..settings }) {
+                        tracing::warn!("encoder reconfigure failed: {e}");
+                    }
+                }
                 if state.keyframe.swap(false, Ordering::Relaxed) {
                     encoder.request_keyframe();
                 }
@@ -231,6 +283,7 @@ impl Streamer {
                     // breaks the reference chain, so restart from a keyframe.
                     Err(TrySendError::Full) => {
                         state.dropped.fetch_add(1, Ordering::Relaxed);
+                        rate.dropped(Instant::now());
                         encoder.request_keyframe();
                     }
                     Err(TrySendError::Closed) => break,
@@ -246,5 +299,48 @@ impl Streamer {
             tracing::debug!("video stream of display {display_id} stopped");
         });
         Ok(Self { shared })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_backs_off_and_recovers() {
+        let t0 = Instant::now();
+        let mut rc = RateControl::new(8000, t0);
+        assert_eq!(rc.tick(t0 + Duration::from_secs(1)), None);
+        rc.dropped(t0 + Duration::from_secs(2));
+        rc.dropped(t0 + Duration::from_secs(2));
+        assert_eq!(rc.tick(t0 + Duration::from_secs(3)), Some(4800));
+        rc.dropped(t0 + Duration::from_secs(4));
+        rc.dropped(t0 + Duration::from_secs(4));
+        // Too soon after the last change.
+        assert_eq!(rc.tick(t0 + Duration::from_secs(5)), None);
+        assert_eq!(rc.tick(t0 + Duration::from_secs(6)), Some(2880));
+        // Calm for long enough: step back up, never above the maximum.
+        assert_eq!(rc.tick(t0 + Duration::from_secs(9)), None);
+        assert_eq!(rc.tick(t0 + Duration::from_secs(12)), Some(3600));
+        let mut t = t0 + Duration::from_secs(12);
+        for _ in 0..20 {
+            t += Duration::from_secs(3);
+            rc.tick(t);
+        }
+        assert_eq!(rc.current, 8000);
+    }
+
+    #[test]
+    fn rate_has_a_floor() {
+        let t0 = Instant::now();
+        let mut rc = RateControl::new(8000, t0);
+        let mut t = t0;
+        for _ in 0..30 {
+            t += Duration::from_secs(3);
+            rc.dropped(t);
+            rc.dropped(t);
+            rc.tick(t);
+        }
+        assert_eq!(rc.current, 1000);
     }
 }
