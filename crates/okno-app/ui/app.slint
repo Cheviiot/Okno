@@ -136,6 +136,8 @@ component HostPage inherits KPage {
     in property <string> login-error;
     in property <[SessionRow]> sessions;
     in-out property <bool> discoverable;
+    in-out property <bool> confirm;
+    callback confirm-changed(bool);
     in-out property <string> new-user;
     in-out property <string> new-password;
     in-out property <string> new-repeat;
@@ -161,8 +163,16 @@ component HostPage inherits KPage {
             title: @tr("Visible on the Network");
             subtitle: @tr("Others find this computer without typing its address.");
             checked <=> root.discoverable;
-            last: true;
             toggled(on) => { root.discoverable-changed(on); }
+        }
+        KSwitchRow {
+            has-icon: true;
+            icon: Icons.key;
+            title: @tr("Ask Before Each Connection");
+            subtitle: @tr("Someone at this computer has to allow every session. Turn off for unattended access.");
+            checked <=> root.confirm;
+            last: true;
+            toggled(on) => { root.confirm-changed(on); }
         }
     }
 
@@ -343,6 +353,7 @@ export component MainWindow inherits KAppWindow {
     in-out property <bool> login-remember;
     in property <string> login-error;
     in property <bool> login-busy;
+    in property <bool> login-waiting;
     callback trust-accepted;
     callback dialog-cancelled;
     callback login-submitted;
@@ -358,6 +369,8 @@ export component MainWindow inherits KAppWindow {
     in property <string> host-login-error;
     in property <[SessionRow]> host-sessions;
     in-out property <bool> host-discoverable;
+    in-out property <bool> host-confirm;
+    callback host-confirm-changed(bool);
     in-out property <string> host-new-user;
     in-out property <string> host-new-password;
     in-out property <string> host-new-repeat;
@@ -385,6 +398,13 @@ export component MainWindow inherits KAppWindow {
     // Notifications
     in property <string> toast;
     in property <bool> toast-error;
+
+    // Incoming connection waiting for permission
+    in property <bool> approval-open;
+    in property <string> approval-device;
+    in property <string> approval-detail;
+    in property <string> approval-fingerprint;
+    callback approval-answered(bool);
 
     KSplitView {
         app-title: "Okno";
@@ -423,6 +443,8 @@ export component MainWindow inherits KAppWindow {
             login-error: root.host-login-error;
             sessions: root.host-sessions;
             discoverable <=> root.host-discoverable;
+            confirm <=> root.host-confirm;
+            confirm-changed(on) => { root.host-confirm-changed(on); }
             new-user <=> root.host-new-user;
             new-password <=> root.host-new-password;
             new-repeat <=> root.host-new-repeat;
@@ -607,14 +629,33 @@ export component MainWindow inherits KAppWindow {
             color: Theme.destructive-text;
             horizontal-alignment: center;
         }
+        if root.login-waiting: KCaption {
+            text: @tr("Waiting for the person at that computer to allow the connection…");
+            horizontal-alignment: center;
+        }
         KDialogButtons {
             KButton { text: @tr("Cancel"); clicked => { root.dialog-cancelled(); } }
             KButton {
-                text: root.login-busy ? @tr("Checking…") : @tr("Connect");
+                text: root.login-waiting ? @tr("Waiting…") : root.login-busy ? @tr("Checking…") : @tr("Connect");
                 primary: true;
                 enabled: !root.login-busy && root.login-password != "";
                 clicked => { root.login-submitted(); }
             }
+        }
+    }
+
+    if root.approval-open: KDialog {
+        title: @tr("Allow “{}” to Control This Computer?", root.approval-device);
+        body: root.approval-detail;
+        KText {
+            text: root.approval-fingerprint;
+            font-family: Theme.mono-family;
+            color: Theme.dim-fg;
+            horizontal-alignment: center;
+        }
+        KDialogButtons {
+            KButton { text: @tr("Deny"); clicked => { root.approval-answered(false); } }
+            KButton { text: @tr("Allow"); primary: true; clicked => { root.approval-answered(true); } }
         }
     }
 }
@@ -1208,6 +1249,9 @@ export global Messages {
     pure public function bad-networks(e: string) -> string { @tr("Invalid network list: {}", e) }
     pure public function choose-folder() -> string { @tr("Choose a Folder for Received Files") }
     pure public function bad-host-port() -> string { @tr("Enter a port between 1 and 65535") }
+    pure public function approval-detail(peer: string, user: string) -> string { @tr("The request comes from {} and logged in as “{}”. Allow only if you expect it.", peer, user) }
+    pure public function approval-title(device: string) -> string { @tr("{} asks to control this computer", device) }
+    pure public function denied() -> string { @tr("The person at that computer declined the connection") }
     pure public function settings-saved() -> string { @tr("Settings saved") }
 
     pure public function size(n: string, unit: int) -> string {

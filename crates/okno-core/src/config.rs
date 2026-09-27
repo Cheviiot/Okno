@@ -52,6 +52,8 @@ pub struct HostConfig {
     pub portal_restore_token: Option<String>,
     /// Where files sent by clients are saved; Downloads when unset.
     pub incoming_dir: Option<std::path::PathBuf>,
+    /// Ask the person at this computer before a session starts.
+    pub confirm_connections: bool,
 }
 
 impl Default for HostConfig {
@@ -65,6 +67,7 @@ impl Default for HostConfig {
             credentials: None,
             portal_restore_token: None,
             incoming_dir: None,
+            confirm_connections: true,
         }
     }
 }

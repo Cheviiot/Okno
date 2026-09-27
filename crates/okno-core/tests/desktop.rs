@@ -26,6 +26,7 @@ async fn streams_video_and_injects_input() {
         credentials: Credentials::new("admin", "hunter22").unwrap(),
         discoverable: false,
         services: vec!["desktop".into()],
+        approver: None,
     };
     let host =
         Host::start(Identity::generate(), settings, Arc::new(DesktopHandler::new(desktop.clone()))).await.unwrap();

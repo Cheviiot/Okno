@@ -19,6 +19,8 @@ use crate::Endpoint;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const REPLY_TIMEOUT: Duration = Duration::from_secs(15);
+/// The host user may take a while to allow the connection.
+const LOGIN_REPLY_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -42,6 +44,8 @@ pub enum ClientError {
     Busy,
     #[error("the host has no password set")]
     NotConfigured,
+    #[error("the person at the host declined the connection")]
+    Denied,
     #[error("unexpected reply from the host")]
     Protocol,
 }
@@ -121,7 +125,11 @@ async fn dial(endpoint: &Endpoint) -> Result<TcpStream, ClientError> {
 }
 
 async fn recv(receiver: &mut Receiver) -> Result<Msg, ClientError> {
-    match tokio::time::timeout(REPLY_TIMEOUT, receiver.recv()).await {
+    recv_within(receiver, REPLY_TIMEOUT).await
+}
+
+async fn recv_within(receiver: &mut Receiver, timeout: Duration) -> Result<Msg, ClientError> {
+    match tokio::time::timeout(timeout, receiver.recv()).await {
         Ok(Ok(Msg::Close(c))) => Err(ClientError::Refused(c.reason)),
         Ok(msg) => Ok(msg?),
         Err(_) => Err(ClientError::Timeout),
@@ -136,7 +144,7 @@ impl Pending {
             .sender()
             .send(Msg::Login(Login { username: username.to_owned(), password: password.to_owned() }))
             .await?;
-        let result = match recv(self.conn.receiver()).await? {
+        let result = match recv_within(self.conn.receiver(), LOGIN_REPLY_TIMEOUT).await? {
             Msg::LoginResult(r) => r,
             _ => return Err(ClientError::Protocol),
         };
@@ -147,6 +155,7 @@ impl Pending {
             LoginStatus::Throttled => return Err(ClientError::Throttled { retry_after }),
             LoginStatus::Busy => return Err(ClientError::Busy),
             LoginStatus::NotConfigured => return Err(ClientError::NotConfigured),
+            LoginStatus::Denied => return Err(ClientError::Denied),
             LoginStatus::Unspecified => return Err(ClientError::Protocol),
         }
         match recv(self.conn.receiver()).await? {

@@ -98,6 +98,8 @@ pub enum LoginStatus {
     Busy = 4,
     /// The host has no password configured.
     NotConfigured = 5,
+    /// The person at the host declined (or did not answer) the request.
+    Denied = 6,
 }
 
 #[derive(Clone, PartialEq, ::prost::Message)]

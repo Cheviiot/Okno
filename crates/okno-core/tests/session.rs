@@ -18,6 +18,7 @@ async fn start_host(allowed: AllowList) -> (Host, Endpoint, Identity) {
         credentials: Credentials::new("admin", "hunter22").unwrap(),
         discoverable: false,
         services: vec![],
+        approver: None,
     };
     let host = Host::start(identity, settings, Arc::new(ControlOnly)).await.unwrap();
     let endpoint = Endpoint::from(host.local_addrs()[0]);
@@ -101,4 +102,30 @@ async fn host_can_disconnect_and_change_password() {
     let mut pending = client::open(&endpoint, &Identity::generate(), &TrustStore::default(), "c").await.unwrap();
     assert!(pending.login("admin", "hunter22").await.is_err());
     pending.login("admin", "new-password").await.unwrap();
+}
+
+#[tokio::test]
+async fn host_user_can_decline_or_allow() {
+    let (host, endpoint, _) = start_host(AllowList::default()).await;
+    let answer = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    {
+        let answer = answer.clone();
+        let seen = seen.clone();
+        host.set_approver(Some(okno_core::host::Approver(Arc::new(move |req| {
+            seen.lock().unwrap().push(req.device_name.clone());
+            let ok = answer.load(std::sync::atomic::Ordering::Relaxed);
+            Box::pin(async move { ok })
+        }))));
+    }
+    let mut pending = client::open(&endpoint, &Identity::generate(), &TrustStore::default(), "laptop").await.unwrap();
+    assert!(matches!(pending.login("admin", "hunter22").await, Err(ClientError::Denied)));
+    answer.store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut pending = client::open(&endpoint, &Identity::generate(), &TrustStore::default(), "laptop").await.unwrap();
+    pending.login("admin", "hunter22").await.unwrap();
+    assert_eq!(seen.lock().unwrap().as_slice(), ["laptop", "laptop"]);
+    // A wrong password never reaches the host user.
+    let mut pending = client::open(&endpoint, &Identity::generate(), &TrustStore::default(), "x").await.unwrap();
+    assert!(pending.login("admin", "wrong-one").await.is_err());
+    assert_eq!(seen.lock().unwrap().len(), 2);
 }

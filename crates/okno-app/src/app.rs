@@ -41,6 +41,8 @@ pub struct App {
     sessions: RefCell<Vec<Rc<SessionView>>>,
     toast_timer: slint::Timer,
     discovery_timer: slint::Timer,
+    /// Switches the login dialog to "waiting for permission".
+    waiting_timer: slint::Timer,
     searching: Cell<bool>,
     look: RefCell<Look>,
     cursor: Cursor,
@@ -50,6 +52,15 @@ pub struct App {
 thread_local! {
     /// The app, for callbacks posted to the UI thread from other threads.
     static APP: RefCell<std::rc::Weak<App>> = const { RefCell::new(std::rc::Weak::new()) };
+}
+
+/// Runs `f` with the app on the UI thread, if it still exists.
+pub fn with_app(f: impl FnOnce(&Rc<App>)) {
+    APP.with(|a| {
+        if let Some(app) = a.borrow().upgrade() {
+            f(&app);
+        }
+    });
 }
 
 impl App {
@@ -95,6 +106,7 @@ impl App {
             sessions: RefCell::default(),
             toast_timer: slint::Timer::default(),
             discovery_timer: slint::Timer::default(),
+            waiting_timer: slint::Timer::default(),
             searching: Cell::new(false),
             look: RefCell::default(),
             cursor: Cursor::default(),
@@ -389,6 +401,7 @@ impl App {
             ClientError::Refused(r) => m.invoke_refused(r.as_str().into()),
             ClientError::Busy => m.invoke_busy(),
             ClientError::NotConfigured => m.invoke_not_configured(),
+            ClientError::Denied => m.invoke_denied(),
             ClientError::BadCredentials { .. } => m.invoke_bad_credentials(),
             ClientError::Throttled { retry_after } => m.invoke_throttled(retry_after.as_secs().max(1) as i32),
             ClientError::Net(e) => m.invoke_network(e.to_string().into()),
@@ -406,6 +419,19 @@ impl App {
         let password = w.get_login_password().to_string();
         w.set_login_busy(true);
         w.set_login_error(SharedString::new());
+        // A password check takes well under a second; a longer wait means
+        // the host is asking its user.
+        let waiting = w.as_weak();
+        self.waiting_timer.start(slint::TimerMode::SingleShot, Duration::from_secs(2), move || {
+            if let Some(w) = waiting.upgrade() {
+                if w.get_login_busy() {
+                    w.set_login_waiting(true);
+                    if w.get_dialog() == DialogKind::Connecting {
+                        w.set_dialog(DialogKind::Login);
+                    }
+                }
+            }
+        });
         let attempt = self.attempt.get();
         let task_user = user.clone();
         let task = self.rt.spawn(async move {
@@ -420,6 +446,8 @@ impl App {
                 return;
             }
             app.window.set_login_busy(false);
+            app.window.set_login_waiting(false);
+            app.waiting_timer.stop();
             let (pending, result) = match joined {
                 Ok(x) => x,
                 Err(e) => return app.connection_failed(&ClientError::Refused(e.to_string()), ""),

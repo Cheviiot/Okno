@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use okno_auth::{AllowList, Credentials};
 use okno_core::desktop::{DesktopHandler, SERVICE_DESKTOP};
-use okno_core::host::{Host, HostEvent, HostSettings, SessionInfo};
+use okno_core::host::{ApprovalRequest, Approver, Host, HostEvent, HostSettings, SessionInfo};
 use okno_desktop::{DesktopError, OpenOptions};
 use okno_net::Identity;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -14,8 +14,12 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::app::App;
 use crate::{Messages, SessionRow};
 
+type Answer = tokio::sync::oneshot::Sender<bool>;
+
 #[derive(Default)]
 pub struct HostState {
+    /// Connections waiting for the user's permission, shown one at a time.
+    approvals: RefCell<std::collections::VecDeque<(u64, ApprovalRequest, Answer)>>,
     running: RefCell<Option<Arc<Host>>>,
     /// Bumped on every start/stop so stale async results are ignored.
     generation: Cell<u64>,
@@ -27,6 +31,7 @@ pub fn init(app: &Rc<App>) {
     let config = app.config.borrow();
     w.set_host_fingerprint(app.identity.fingerprint().display_short().into());
     w.set_host_discoverable(config.host.discoverable);
+    w.set_host_confirm(config.host.confirm_connections);
     w.set_host_new_user(if let Some(c) = &config.host.credentials { c.username.clone() } else { "okno".into() }.into());
     drop(config);
     refresh_login(app);
@@ -65,6 +70,24 @@ pub fn init(app: &Rc<App>) {
         }
     });
 
+    let weak = Rc::downgrade(app);
+    w.on_host_confirm_changed(move |on| {
+        let Some(app) = weak.upgrade() else { return };
+        app.config.borrow_mut().host.confirm_connections = on;
+        app.save_config();
+        if let Some(host) = app.host.running.borrow().as_ref() {
+            host.set_approver(on.then(approver));
+        }
+    });
+    let weak = Rc::downgrade(app);
+    w.on_approval_answered(move |allow| {
+        let Some(app) = weak.upgrade() else { return };
+        let front = app.host.approvals.borrow_mut().pop_front();
+        if let Some((_, _, answer)) = front {
+            let _ = answer.send(allow);
+        }
+        show_approval(&app);
+    });
     let weak = Rc::downgrade(app);
     w.on_host_port_committed(move |text| {
         let Some(app) = weak.upgrade() else { return };
@@ -108,6 +131,61 @@ pub fn init(app: &Rc<App>) {
         drop(config);
         start(app);
     }
+}
+
+static NEXT_APPROVAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Asks the user through the approval dialog; gives up (denies) shortly
+/// before the host's own timeout.
+fn approver() -> Approver {
+    Approver(Arc::new(|request: ApprovalRequest| {
+        Box::pin(async move {
+            let id = NEXT_APPROVAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let _ = slint::invoke_from_event_loop(move || crate::app::with_app(|app| ask(app, id, request, tx)));
+            let wait = okno_core::host::APPROVAL_TIMEOUT - std::time::Duration::from_secs(2);
+            match tokio::time::timeout(wait, rx).await {
+                Ok(Ok(allow)) => allow,
+                _ => {
+                    let _ = slint::invoke_from_event_loop(move || crate::app::with_app(|app| withdraw(app, id)));
+                    false
+                }
+            }
+        })
+    }))
+}
+
+fn ask(app: &App, id: u64, request: ApprovalRequest, answer: Answer) {
+    let m = messages(app);
+    crate::notify::show(
+        &app.rt,
+        &format!("okno-approval-{id}"),
+        m.invoke_approval_title(request.device_name.as_str().into()).into(),
+        m.invoke_approval_detail(request.peer.ip().to_string().into(), request.username.as_str().into()).into(),
+    );
+    let _ = app.window.show();
+    app.window.set_page(1);
+    app.host.approvals.borrow_mut().push_back((id, request, answer));
+    show_approval(app);
+}
+
+fn withdraw(app: &App, id: u64) {
+    app.host.approvals.borrow_mut().retain(|(i, _, _)| *i != id);
+    show_approval(app);
+}
+
+fn show_approval(app: &App) {
+    let w = &app.window;
+    let approvals = app.host.approvals.borrow();
+    let Some((_, req, _)) = approvals.front() else {
+        w.set_approval_open(false);
+        return;
+    };
+    let m = messages(app);
+    w.set_approval_device(req.device_name.as_str().into());
+    w.set_approval_detail(m.invoke_approval_detail(req.peer.ip().to_string().into(), req.username.as_str().into()));
+    w.set_approval_fingerprint(req.fingerprint.display_short().into());
+    w.set_approval_open(true);
 }
 
 fn show_settings(app: &App) {
@@ -236,6 +314,7 @@ fn start(app: &Rc<App>) {
             credentials,
             discoverable: settings_base.host.discoverable,
             services: vec![SERVICE_DESKTOP.into()],
+            approver: settings_base.host.confirm_connections.then(approver),
         };
         let mut handler = DesktopHandler::new(opened.desktop);
         if let Some(dir) = settings_base.host.incoming_dir.clone() {
@@ -303,6 +382,10 @@ fn failed(app: &App, error: DesktopError) {
 }
 
 fn stop(app: &App) {
+    for (_, _, answer) in app.host.approvals.borrow_mut().drain(..) {
+        let _ = answer.send(false);
+    }
+    app.window.set_approval_open(false);
     app.host.generation.set(app.host.generation.get() + 1);
     app.host.running.borrow_mut().take();
     app.host.sessions.borrow_mut().clear();

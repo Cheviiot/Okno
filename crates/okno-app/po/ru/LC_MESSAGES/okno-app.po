@@ -555,3 +555,30 @@ msgstr "Плавно"
 
 msgid "60 fps, up to 6 Mbit/s"
 msgstr "60 кадров/с, до 6 Мбит/с"
+
+msgid "Ask Before Each Connection"
+msgstr "Спрашивать перед каждым подключением"
+
+msgid "Someone at this computer has to allow every session. Turn off for unattended access."
+msgstr "Каждый сеанс нужно разрешить на этом компьютере. Выключите для доступа без присутствия."
+
+msgid "Allow “{}” to Control This Computer?"
+msgstr "Разрешить «{}» управлять этим компьютером?"
+
+msgid "Deny"
+msgstr "Отклонить"
+
+msgid "Allow"
+msgstr "Разрешить"
+
+msgid "The request comes from {} and logged in as “{}”. Allow only if you expect it."
+msgstr "Запрос с адреса {}, вход выполнен как «{}». Разрешайте, только если ждёте подключения."
+
+msgid "{} asks to control this computer"
+msgstr "{} просит доступ к этому компьютеру"
+
+msgid "The person at that computer declined the connection"
+msgstr "На том компьютере подключение отклонили"
+
+msgid "Waiting for the person at that computer to allow the connection…"
+msgstr "Ждём, пока на том компьютере разрешат подключение…"

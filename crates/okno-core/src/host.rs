@@ -26,6 +26,30 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// The client may be showing a fingerprint prompt before it logs in.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_ATTEMPTS_PER_CONNECTION: u32 = 5;
+/// How long the person at the host has to allow a connection.
+pub const APPROVAL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// A connection waiting for the host user's permission.
+#[derive(Clone, Debug)]
+pub struct ApprovalRequest {
+    pub peer: SocketAddr,
+    pub fingerprint: Fingerprint,
+    pub device_name: String,
+    pub username: String,
+}
+
+/// Future answering an [`ApprovalRequest`].
+pub type Approval = Pin<Box<dyn Future<Output = bool> + Send>>;
+
+/// Asks the person at the host whether a connection may proceed.
+#[derive(Clone)]
+pub struct Approver(pub Arc<dyn Fn(ApprovalRequest) -> Approval + Send + Sync>);
+
+impl std::fmt::Debug for Approver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Approver")
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct HostSettings {
@@ -37,6 +61,8 @@ pub struct HostSettings {
     pub discoverable: bool,
     /// Service names advertised in `HostInfo`.
     pub services: Vec<String>,
+    /// When set, every login also needs the host user's permission.
+    pub approver: Option<Approver>,
 }
 
 #[derive(Clone, Debug)]
@@ -117,6 +143,7 @@ struct Shared {
     settings: HostSettings,
     /// Replaceable while running (`Host::set_credentials`).
     credentials: RwLock<Credentials>,
+    approver: RwLock<Option<Approver>>,
     handler: Arc<dyn SessionHandler>,
     throttle: LoginThrottle,
     events: broadcast::Sender<HostEvent>,
@@ -165,6 +192,7 @@ impl Host {
         let shared = Arc::new(Shared {
             identity,
             credentials: RwLock::new(settings.credentials.clone()),
+            approver: RwLock::new(settings.approver.clone()),
             settings,
             handler,
             throttle: LoginThrottle::default(),
@@ -188,6 +216,11 @@ impl Host {
 
     pub fn fingerprint(&self) -> Fingerprint {
         self.shared.identity.fingerprint()
+    }
+
+    /// Turns asking the host user on (`Some`) or off for new connections.
+    pub fn set_approver(&self, approver: Option<Approver>) {
+        *self.shared.approver.write().unwrap() = approver;
     }
 
     /// New logins are checked against `credentials`; open sessions stay.
@@ -336,7 +369,7 @@ async fn serve(stream: TcpStream, peer: SocketAddr, id: u64, shared: &Shared) ->
         .await
         .map_err(|e| e.to_string())?;
 
-    let Some(username) = login(&sender, &mut receiver, peer, shared).await? else {
+    let Some(username) = login(&sender, &mut receiver, peer, (fingerprint, &hello.device_name), shared).await? else {
         return Ok(None);
     };
 
@@ -365,6 +398,7 @@ async fn login(
     sender: &Sender,
     receiver: &mut Receiver,
     peer: SocketAddr,
+    (fingerprint, device_name): (Fingerprint, &str),
     shared: &Shared,
 ) -> Result<Option<String>, String> {
     let reply = |status: LoginStatus, retry: Duration| {
@@ -387,6 +421,22 @@ async fn login(
             let ok = tokio::task::spawn_blocking(move || creds.verify(&username, password)).await.unwrap_or(false);
             if ok {
                 shared.throttle.record_success(peer.ip());
+                let approver = shared.approver.read().unwrap().clone();
+                if let Some(approver) = approver {
+                    let request = ApprovalRequest {
+                        peer,
+                        fingerprint,
+                        device_name: device_name.to_owned(),
+                        username: login.username.clone(),
+                    };
+                    let allowed = tokio::time::timeout(APPROVAL_TIMEOUT, (approver.0)(request)).await.unwrap_or(false);
+                    if !allowed {
+                        tracing::info!("connection from {peer} declined by the host user");
+                        let _ = sender.send(reply(LoginStatus::Denied, Duration::ZERO)).await;
+                        let _ = shared.events.send(HostEvent::LoginFailed { peer, status: LoginStatus::Denied });
+                        return Ok(None);
+                    }
+                }
                 sender.send(reply(LoginStatus::Ok, Duration::ZERO)).await.map_err(|e| e.to_string())?;
                 return Ok(Some(login.username));
             }

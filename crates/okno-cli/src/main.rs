@@ -174,6 +174,7 @@ async fn run_host(store: &Store, port: Option<u16>, test_pattern: bool) -> Resul
         credentials,
         discoverable: config.host.discoverable,
         services: vec![okno_core::desktop::SERVICE_DESKTOP.into()],
+        approver: None,
     };
     let desktop: Arc<dyn Desktop> = if test_pattern {
         Arc::new(TestDesktop::new(1280, 720, 30))

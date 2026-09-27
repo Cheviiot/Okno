@@ -21,6 +21,7 @@ async fn upload_list_and_download() {
         credentials: Credentials::new("admin", "hunter22").unwrap(),
         discoverable: false,
         services: vec![],
+        approver: None,
     };
     let handler = DesktopHandler::new(Arc::new(TestDesktop::new(64, 64, 5))).with_incoming(incoming.path().into());
     let host = Host::start(Identity::generate(), settings, Arc::new(handler)).await.unwrap();
