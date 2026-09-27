@@ -10,7 +10,12 @@ distrobox enter okno-dev -- sudo dnf -y install \
   rust cargo clippy rustfmt clang cmake nasm pkgconf-pkg-config protobuf-compiler \
   pipewire-devel dbus-devel fontconfig-devel freetype-devel libxkbcommon-devel \
   wayland-devel libX11-devel opus-devel \
-  mingw64-gcc mingw64-winpthreads-static rust-std-static-x86_64-pc-windows-gnu
+  mingw64-gcc mingw64-gcc-c++ mingw64-winpthreads-static \
+  rust-std-static-x86_64-pc-windows-gnu
+# Для проверки интерфейса на виртуальном дисплее:
+distrobox enter okno-dev -- sudo dnf -y install \
+  xorg-x11-server-Xvfb ImageMagick xdotool mesa-dri-drivers \
+  libXcursor libXrandr libXi libxkbcommon-x11 libX11-xcb mesa-libEGL mesa-libGL
 ```
 
 ## Команды
@@ -56,4 +61,31 @@ GNOME показывает диалог, токен восстановления
 | `okno-codec` | H.264 (OpenH264 из исходников): кодер и декодер |
 | `okno-desktop` | Захват экрана и ввод: порталы + PipeWire (Linux), WGC + SendInput (Windows), тестовый рабочий стол |
 | `okno-core` | Конфиг, ключ устройства, хост, клиентская сессия, служба рабочего стола |
+| `okno-app` | Приложение на Slint (`okno`) |
 | `okno-cli` | Командная строка |
+
+## Интерфейс
+
+Экраны описаны один раз в `crates/okno-app/ui/app.slint` и используют только
+компоненты набора `@kit`: `KButton`, `KEntry`, `KSwitch`, `KGroup`, `KRow`,
+`KPage`, `KSidebar`, `KDialog` и другие. Наборов два, с одинаковым API:
+`ui/kit/adwaita` (токены libadwaita 1.6) и `ui/kit/fluent` (WinUI 3). `build.rs`
+выбирает набор по целевой ОС; `OKNO_UI_KIT=adwaita|fluent` переопределяет выбор.
+Новый компонент нужно добавлять в оба набора сразу.
+
+Строки интерфейса пишутся по-английски в `@tr(...)`; строки, которые собирает
+Rust-код, живут в глобальном объекте `Messages` в `app.slint`. Русский перевод —
+`crates/okno-app/po/ru/LC_MESSAGES/okno-app.po`, он вшивается при сборке.
+Язык берётся из системы, `OKNO_LANG=en|ru` переопределяет.
+
+Скриншот на собственном виртуальном дисплее (основной экран не затрагивается):
+
+```sh
+distrobox enter okno-dev -- scripts/ui-screenshot.sh /tmp/shot.png 1 fluent ru dark
+```
+
+Аргументы: страница (0 — устройства, 1 — этот компьютер, 2 — настройки),
+набор, язык, схема (`OKNO_COLOR_SCHEME=light|dark`).
+
+`zbus` должен работать без tokio (`ashpd` с `async-io`): поток AccessKit
+интерфейса вызывает zbus вне tokio-runtime и падает, если у zbus включён tokio.

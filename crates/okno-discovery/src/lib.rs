@@ -110,12 +110,17 @@ fn merge(found: Vec<(Source, Peer)>, own: Option<Fingerprint>) -> Vec<Peer> {
     }
     let mut peers: Vec<Peer> = by_fp.into_values().collect();
     for peer in &mut peers {
-        // IPv4 first: link-local IPv6 needs a scope id that users cannot type.
-        peer.addresses.sort_by_key(|a| (a.is_ipv6(), *a));
+        // Plain LAN IPv4 first, then overlay (CGNAT, e.g. Tailscale), then
+        // IPv6: link-local IPv6 needs a scope id that users cannot type.
+        peer.addresses.sort_by_key(|a| (a.is_ipv6(), is_cgnat(a.ip()), *a));
         peer.sources.sort();
     }
     peers.sort_by_key(|p| p.name.to_lowercase());
     peers
+}
+
+fn is_cgnat(ip: std::net::IpAddr) -> bool {
+    matches!(ip, std::net::IpAddr::V4(v4) if v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))
 }
 
 /// Protocol-level sanity filter shared by both mechanisms.
@@ -141,6 +146,7 @@ mod tests {
     fn merges_by_fingerprint_and_skips_self() {
         let found = vec![
             (Source::Mdns, peer(1, "beta", "[fd00::5]:21200")),
+            (Source::Mdns, peer(1, "beta", "100.101.1.5:21200")),
             (Source::Broadcast, peer(1, "beta", "192.168.1.5:21200")),
             (Source::Broadcast, peer(2, "Alpha", "192.168.1.6:21200")),
             (Source::Mdns, peer(3, "me", "192.168.1.7:21200")),

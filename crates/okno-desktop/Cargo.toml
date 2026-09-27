@@ -14,7 +14,9 @@ tracing.workspace = true
 tokio.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.13", default-features = false, features = ["tokio", "remote_desktop", "screencast", "clipboard"] }
+# async-io, not tokio: zbus with the tokio feature panics on threads
+# without a runtime, such as the AccessKit thread of the UI.
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "remote_desktop", "screencast", "clipboard"] }
 pipewire = "0.10"
 
 [target.'cfg(windows)'.dependencies]

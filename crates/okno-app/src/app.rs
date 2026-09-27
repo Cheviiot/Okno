@@ -273,7 +273,7 @@ impl App {
             };
             let w = &app.window;
             w.set_dialog_host(pending.host.device_name.as_str().into());
-            w.set_dialog_fingerprint(pending.fingerprint.display_short().into());
+            w.set_dialog_fingerprint(two_lines(&pending.fingerprint.display_short()).into());
             w.set_login_error(SharedString::new());
             w.set_login_password(SharedString::new());
             let dialog = match &pending.trust {
@@ -398,6 +398,13 @@ impl App {
             Err(e) => self.toast(e.to_string().into(), true),
         }
     }
+}
+
+/// "AAAA BBBB … HHHH" as two lines of four groups, easier to compare.
+fn two_lines(fingerprint: &str) -> String {
+    let groups: Vec<&str> = fingerprint.split(' ').collect();
+    let (first, second) = groups.split_at(groups.len().div_ceil(2));
+    format!("{}\n{}", first.join(" "), second.join(" "))
 }
 
 fn os_label(os: &str) -> &str {

@@ -79,6 +79,7 @@ impl Desktop for TestDesktop {
     }
 
     fn inject(&self, event: InputEvent) {
+        tracing::info!("test desktop input: {:?}", event.event);
         self.inputs.lock().unwrap().push(event);
     }
 }
